@@ -7,6 +7,9 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import AppUsers from './pages/admin/AppUsers';
+import DebugUsers from "./pages/DebugUsers";
+
+
 
 // Pages
 import Index from "./pages/Index";
@@ -24,6 +27,7 @@ import HealthRequests from "./pages/admin/HealthRequests";
 import ASHAWorkers from "./pages/admin/ASHAWorkers";
 import Reports from "./pages/admin/Reports";
 import Settings from "./pages/admin/Settings";
+
 
 
 // Delivery Pages
@@ -60,6 +64,7 @@ function App() {
                 <Route path="/admin/reports" element={<Reports />} />
                 <Route path="/admin/settings" element={<Settings />} />
                 <Route path="/admin/app-users" element={<AppUsers />} />
+                <Route path="/debug-users" element={<DebugUsers />} />
 
                 {/* Delivery Routes */}
                 <Route path="/delivery" element={<DeliveryDashboard />} />

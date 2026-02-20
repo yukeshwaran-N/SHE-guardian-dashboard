@@ -26,16 +26,16 @@ import {
   Activity,
   Loader2,
   RefreshCw,
-  Filter
+  AlertCircle
 } from "lucide-react";
 import { format } from "date-fns";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function AppUsers() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<AppUser[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({
     total: 0,
     completedQuestionnaire: 0,
@@ -66,15 +66,37 @@ export default function AppUsers() {
   const fetchUsers = async () => {
     try {
       setLoading(true);
+      setError(null);
+      console.log("Fetching users from 'user' table...");
+      
       const data = await usersService.getAllUsers();
+      console.log("Fetched users:", data);
+      
       setUsers(data);
       setFilteredUsers(data);
       
       // Fetch stats
-      const userStats = await usersService.getUserStats();
-      setStats(userStats);
-    } catch (error) {
+      try {
+        const userStats = await usersService.getUserStats();
+        setStats(userStats);
+      } catch (statsError) {
+        console.error("Error fetching stats:", statsError);
+        // Set stats manually from data
+        setStats({
+          total: data.length,
+          completedQuestionnaire: data.filter(u => u.has_completed_questionnaire).length,
+          completedOnboarding: data.filter(u => u.is_onboarding_complete).length,
+          activeToday: data.filter(u => {
+            if (!u.last_active) return false;
+            const lastActive = new Date(u.last_active).toDateString();
+            const today = new Date().toDateString();
+            return lastActive === today;
+          }).length
+        });
+      }
+    } catch (error: any) {
       console.error("Error fetching users:", error);
+      setError(error.message || "Failed to load users");
     } finally {
       setLoading(false);
     }
@@ -88,14 +110,58 @@ export default function AppUsers() {
       .toUpperCase() || 'U';
   };
 
-  const formatDate = (date: string) => {
-    return date ? format(new Date(date), 'dd MMM yyyy') : 'N/A';
+  const formatDate = (date: string | null) => {
+    if (!date) return 'N/A';
+    try {
+      return format(new Date(date), 'dd MMM yyyy');
+    } catch {
+      return 'Invalid date';
+    }
+  };
+
+  const formatDateTime = (date: string | null) => {
+    if (!date) return 'N/A';
+    try {
+      return format(new Date(date), 'dd MMM yyyy, HH:mm');
+    } catch {
+      return 'Invalid date';
+    }
+  };
+
+  const getLanguageName = (code: string | null) => {
+    if (!code) return 'Not set';
+    const languages: Record<string, string> = {
+      en: 'English',
+      hi: 'Hindi',
+      ta: 'Tamil',
+      te: 'Telugu',
+      bn: 'Bengali',
+      mr: 'Marathi',
+      gu: 'Gujarati',
+      kn: 'Kannada',
+      ml: 'Malayalam',
+      pa: 'Punjabi'
+    };
+    return languages[code] || code;
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 space-y-4">
+        <AlertCircle className="h-12 w-12 text-destructive" />
+        <p className="text-destructive font-medium">{error}</p>
+        <Button onClick={fetchUsers} variant="outline">
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Try Again
+        </Button>
       </div>
     );
   }
@@ -166,8 +232,8 @@ export default function AppUsers() {
                 <UserPlus className="h-4 w-4 text-purple-600" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">New This Week</p>
-                <p className="text-2xl font-bold">12</p>
+                <p className="text-sm text-muted-foreground">Completed Questionnaire</p>
+                <p className="text-2xl font-bold">{stats.completedQuestionnaire}</p>
               </div>
             </div>
           </CardContent>
@@ -217,7 +283,7 @@ export default function AppUsers() {
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Avatar className="h-8 w-8">
-                          <AvatarImage src={user.avatar_url} />
+                          <AvatarImage src={user.avatar_url || ''} />
                           <AvatarFallback>{getInitials(user.full_name)}</AvatarFallback>
                         </Avatar>
                         <div>
@@ -228,21 +294,25 @@ export default function AppUsers() {
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-sm">
-                          <Mail className="h-3 w-3 text-muted-foreground" />
-                          <span>{user.email || 'N/A'}</span>
-                        </div>
-                        <div className="flex items-center gap-1 text-sm">
-                          <Phone className="h-3 w-3 text-muted-foreground" />
-                          <span>{user.phone || 'N/A'}</span>
-                        </div>
+                        {user.email && (
+                          <div className="flex items-center gap-1 text-sm">
+                            <Mail className="h-3 w-3 text-muted-foreground" />
+                            <span className="truncate max-w-[150px]">{user.email}</span>
+                          </div>
+                        )}
+                        {user.phone && (
+                          <div className="flex items-center gap-1 text-sm">
+                            <Phone className="h-3 w-3 text-muted-foreground" />
+                            <span>{user.phone}</span>
+                          </div>
+                        )}
                       </div>
                     </TableCell>
                     <TableCell>{formatDate(user.date_of_birth)}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="gap-1">
                         <Globe className="h-3 w-3" />
-                        {user.preferred_language || 'en'}
+                        {getLanguageName(user.preferred_language)}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -257,15 +327,17 @@ export default function AppUsers() {
                         )}
                       </div>
                     </TableCell>
-                    <TableCell>{formatDate(user.created_at)}</TableCell>
+                    <TableCell>{formatDateTime(user.created_at)}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         <Activity className={`h-3 w-3 ${
-                          new Date(user.last_active) > new Date(Date.now() - 24*60*60*1000)
+                          user.last_active && new Date(user.last_active) > new Date(Date.now() - 24*60*60*1000)
                             ? 'text-green-500'
                             : 'text-gray-300'
                         }`} />
-                        <span className="text-xs">{format(new Date(user.last_active), 'HH:mm')}</span>
+                        <span className="text-xs">
+                          {user.last_active ? format(new Date(user.last_active), 'HH:mm') : 'N/A'}
+                        </span>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -277,28 +349,29 @@ export default function AppUsers() {
       </Card>
 
       {/* Language Distribution */}
-      <Card>
-        <CardHeader>
-          <CardTitle>User Distribution by Language</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-4">
-            {['en', 'hi', 'ta', 'te'].map((lang) => {
-              const count = users.filter(u => u.preferred_language === lang).length;
-              const percentage = users.length ? ((count / users.length) * 100).toFixed(1) : 0;
-              return (
-                <div key={lang} className="text-center p-3 bg-muted/30 rounded-lg">
-                  <p className="text-lg font-bold">{count}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {lang === 'en' ? 'English' : lang === 'hi' ? 'Hindi' : lang === 'ta' ? 'Tamil' : 'Telugu'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{percentage}%</p>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
+      {users.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>User Distribution by Language</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-4">
+              {['en', 'hi', 'ta', 'te', 'bn', 'mr'].map((lang) => {
+                const count = users.filter(u => u.preferred_language === lang).length;
+                if (count === 0) return null;
+                const percentage = ((count / users.length) * 100).toFixed(1);
+                return (
+                  <div key={lang} className="text-center p-3 bg-muted/30 rounded-lg">
+                    <p className="text-lg font-bold">{count}</p>
+                    <p className="text-sm text-muted-foreground">{getLanguageName(lang)}</p>
+                    <p className="text-xs text-muted-foreground">{percentage}%</p>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

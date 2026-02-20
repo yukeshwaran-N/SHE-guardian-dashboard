@@ -1,32 +1,18 @@
 // src/services/usersService.ts
-import { supabase } from './supabase';
-
-export interface AppUser {
-  id: string;
-  auth_id: string;
-  phone: string;
-  email: string;
-  full_name: string;
-  date_of_birth: string;
-  gender: 'female' | 'male' | 'other' | 'prefer_not_to_say';
-  preferred_language: string;
-  avatar_url: string;
-  is_onboarding_complete: boolean;
-  has_completed_questionnaire: boolean;
-  last_active: string;
-  created_at: string;
-  updated_at: string;
-}
+import { supabase, AppUser } from './supabase';
 
 export const usersService = {
   // Get all registered users from the app
   async getAllUsers() {
     const { data, error } = await supabase
-      .from('users')
+      .from('users')  // Using 'users' (plural) as per your SQL
       .select('*')
       .order('created_at', { ascending: false });
     
-    if (error) throw error;
+    if (error) {
+      console.error("Error fetching users:", error);
+      throw error;
+    }
     return data as AppUser[];
   },
 
@@ -81,34 +67,73 @@ export const usersService = {
 
   // Get user statistics
   async getUserStats() {
-    const { data: total, error: totalError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true });
-    
-    const { data: completed, error: completedError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .eq('has_completed_questionnaire', true);
-    
-    const { data: onboarding, error: onboardingError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_onboarding_complete', true);
-    
-    const { data: activeToday, error: activeError } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .gte('last_active', new Date().toISOString().split('T')[0]);
-    
-    if (totalError || completedError || onboardingError || activeError) {
-      throw new Error('Error fetching user stats');
-    }
+    try {
+      // First, try to get counts
+      const { count: total, error: totalError } = await supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true });
+      
+      if (totalError) throw totalError;
 
-    return {
-      total: total?.length || 0,
-      completedQuestionnaire: completed?.length || 0,
-      completedOnboarding: onboarding?.length || 0,
-      activeToday: activeToday?.length || 0
-    };
+      // Get all data for other stats since count with filters might not work
+      const { data, error } = await supabase
+        .from('users')
+        .select('has_completed_questionnaire, is_onboarding_complete, last_active');
+      
+      if (error) throw error;
+
+      const activeToday = data?.filter(u => {
+        if (!u.last_active) return false;
+        const lastActive = new Date(u.last_active).toDateString();
+        const today = new Date().toDateString();
+        return lastActive === today;
+      }).length || 0;
+
+      return {
+        total: total || 0,
+        completedQuestionnaire: data?.filter(u => u.has_completed_questionnaire).length || 0,
+        completedOnboarding: data?.filter(u => u.is_onboarding_complete).length || 0,
+        activeToday: activeToday
+      };
+    } catch (error) {
+      console.error("Error in getUserStats:", error);
+      // Fallback: get all data and calculate manually
+      const { data } = await supabase
+        .from('users')
+        .select('*');
+      
+      if (data) {
+        return {
+          total: data.length,
+          completedQuestionnaire: data.filter(u => u.has_completed_questionnaire).length,
+          completedOnboarding: data.filter(u => u.is_onboarding_complete).length,
+          activeToday: data.filter(u => {
+            if (!u.last_active) return false;
+            const lastActive = new Date(u.last_active).toDateString();
+            const today = new Date().toDateString();
+            return lastActive === today;
+          }).length
+        };
+      }
+      
+      return {
+        total: 0,
+        completedQuestionnaire: 0,
+        completedOnboarding: 0,
+        activeToday: 0
+      };
+    }
+  },
+
+  // Search users
+  async searchUsers(searchTerm: string) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data as AppUser[];
   }
 };
