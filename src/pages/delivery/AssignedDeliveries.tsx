@@ -1,10 +1,14 @@
 // src/pages/delivery/AssignedDeliveries.tsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/services/supabase";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import { useToast } from "@/hooks/use-toast";
 import {
   Search,
   MapPin,
@@ -13,77 +17,236 @@ import {
   Package,
   Clock,
   Navigation,
-  CheckCircle,
-  AlertCircle,
-  Filter,
-  SortAsc,
-  RefreshCw,
   User,
-  Home,
-  Briefcase
+  Filter,
+  RefreshCw,
+  AlertCircle,
+  Loader2
 } from "lucide-react";
-import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface Delivery {
+  id: string;
+  order_id: string | null;
+  woman_name: string | null;
+  address: string | null;
+  items: any | null;
+  status: string | null;
+  priority?: 'high' | 'medium' | 'low';
+  scheduled_date: string | null;
+  delivery_partner: string | null;
+  contact?: string | null;
+  lat?: number;
+  lng?: number;
+  progress?: number;
+}
 
 export default function AssignedDeliveries() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [filteredDeliveries, setFilteredDeliveries] = useState<Delivery[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedTab, setSelectedTab] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  const deliveries = [
-    {
-      id: "DEL001",
-      priority: "high",
-      womanName: "Priya Sharma",
-      address: "House 123, Block A, Sector 12",
-      items: ["Sanitary Kit", "Nutrition Pack", "Vitamins"],
-      scheduledTime: "10:30 AM",
-      distance: "2.5 km",
-      status: "assigned",
-      contact: "+91 98765 43210",
-      instructions: "Call before arrival"
-    },
-    {
-      id: "DEL002",
-      priority: "medium",
-      womanName: "Sunita Patel",
-      address: "House 45, Block C, Sector 15",
-      items: ["Prenatal Vitamins", "Iron Tablets"],
-      scheduledTime: "11:45 AM",
-      distance: "3.2 km",
-      status: "assigned",
-      contact: "+91 98765 43211"
-    },
-    {
-      id: "DEL003",
-      priority: "high",
-      womanName: "Lakshmi Devi",
-      address: "House 67, Block B, Sector 10",
-      items: ["Postnatal Care Kit", "Baby Essentials"],
-      scheduledTime: "2:00 PM",
-      distance: "1.8 km",
-      status: "in-transit",
-      contact: "+91 98765 43212",
-      progress: 45
-    },
-    {
-      id: "DEL004",
-      priority: "low",
-      womanName: "Kavita Singh",
-      address: "House 89, Block D, Sector 14",
-      items: ["Health Supplements"],
-      scheduledTime: "4:30 PM",
-      distance: "4.1 km",
-      status: "assigned",
-      contact: "+91 98765 43213"
+  // Fetch assigned deliveries from Supabase
+  useEffect(() => {
+    fetchAssignedDeliveries();
+
+    // Real-time subscription for updates
+    const subscription = supabase
+      .channel('assigned-deliveries-changes')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'deliveries',
+        filter: `delivery_partner=eq.${user?.id}`
+      }, () => {
+        fetchAssignedDeliveries(true);
+      })
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [user]);
+
+  useEffect(() => {
+    filterDeliveries();
+  }, [searchTerm, statusFilter, deliveries]);
+
+  const fetchAssignedDeliveries = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      // Get deliveries assigned to this partner that are not delivered/cancelled
+      const { data, error } = await supabase
+        .from('deliveries')
+        .select('*')
+        .eq('delivery_partner', user?.id)
+        .not('status', 'in', '("delivered","cancelled")')
+        .order('scheduled_date', { ascending: true });
+
+      if (error) throw error;
+
+      // Add mock coordinates for demo (replace with actual geocoding)
+      const deliveriesWithCoords = (data || []).map((delivery, index) => ({
+        ...delivery,
+        lat: 28.5900 + (index * 0.01),
+        lng: 77.2500 + (index * 0.01),
+        priority: getRandomPriority(),
+        progress: delivery.status === 'in-transit' ? Math.floor(Math.random() * 60) + 20 : undefined
+      }));
+
+      console.log('Fetched deliveries:', deliveriesWithCoords);
+      setDeliveries(deliveriesWithCoords);
+      setFilteredDeliveries(deliveriesWithCoords);
+    } catch (error) {
+      console.error('Error fetching deliveries:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load assigned deliveries",
+        variant: "destructive",
+      });
+    } finally {
+      if (!silent) setLoading(false);
     }
-  ];
+  };
 
-  const filteredDeliveries = deliveries.filter(d => 
-    d.womanName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    d.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    d.address.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filterDeliveries = () => {
+    let filtered = [...deliveries];
 
-  const getPriorityColor = (priority: string) => {
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(d => 
+        d.woman_name?.toLowerCase().includes(term) ||
+        d.address?.toLowerCase().includes(term) ||
+        d.id?.toLowerCase().includes(term)
+      );
+    }
+
+    // Status filter
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(d => d.status === statusFilter);
+    }
+
+    setFilteredDeliveries(filtered);
+  };
+
+  const handleStatusUpdate = async (deliveryId: string, newStatus: string) => {
+    setUpdatingId(deliveryId);
+    try {
+      const { error } = await supabase
+        .from('deliveries')
+        .update({ 
+          status: newStatus,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', deliveryId);
+
+      if (error) throw error;
+
+      // Update local state
+      setDeliveries(prev => prev.map(d => 
+        d.id === deliveryId ? { ...d, status: newStatus } : d
+      ));
+
+      toast({
+        title: "Status Updated",
+        description: `Delivery marked as ${newStatus}`,
+      });
+    } catch (error) {
+      console.error('Error updating status:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update status",
+        variant: "destructive",
+      });
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  const handleNavigate = (delivery: Delivery) => {
+    navigate('/delivery/map', {
+      state: {
+        id: delivery.id,
+        lat: delivery.lat || 28.6139,
+        lng: delivery.lng || 77.2090,
+        address: delivery.address,
+        womanName: delivery.woman_name,
+        scheduledTime: formatTime(delivery.scheduled_date),
+        distance: calculateDistance(delivery.lat, delivery.lng),
+        contact: delivery.contact,
+        items: delivery.items,
+        status: delivery.status,
+        priority: delivery.priority
+      }
+    });
+  };
+
+  const handleContact = (contact: string | null) => {
+    if (contact) {
+      window.location.href = `tel:${contact}`;
+    } else {
+      toast({
+        title: "No Contact",
+        description: "Contact information not available",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Helper functions
+  const getRandomPriority = (): 'high' | 'medium' | 'low' => {
+    const priorities: ('high' | 'medium' | 'low')[] = ['high', 'medium', 'low'];
+    return priorities[Math.floor(Math.random() * priorities.length)];
+  };
+
+  const formatTime = (date: string | null): string => {
+    if (!date) return 'Time TBD';
+    try {
+      return new Date(date).toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      });
+    } catch {
+      return 'Time TBD';
+    }
+  };
+
+  const calculateDistance = (lat?: number, lng?: number): string => {
+    if (!lat || !lng) return 'Distance TBD';
+    // Mock distance calculation
+    const distance = (Math.random() * 4 + 1).toFixed(1);
+    return `${distance} km`;
+  };
+
+  const parseItems = (items: any): string[] => {
+    if (!items) return [];
+    if (Array.isArray(items)) return items;
+    if (typeof items === 'string') {
+      try {
+        return JSON.parse(items);
+      } catch {
+        return [items];
+      }
+    }
+    return [];
+  };
+
+  const getPriorityColor = (priority?: string) => {
     switch(priority) {
       case 'high': return 'bg-red-100 text-red-800 border-red-200';
       case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
@@ -92,32 +255,52 @@ export default function AssignedDeliveries() {
     }
   };
 
+  const getStatusColor = (status: string | null) => {
+    switch(status) {
+      case 'delivered': return 'bg-green-100 text-green-800 border-green-200';
+      case 'in-transit': return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'assigned': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'pending': return 'bg-orange-100 text-orange-800 border-orange-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+    }
+  };
+
+  // Calculate stats
+  const stats = {
+    total: deliveries.length,
+    pending: deliveries.filter(d => d.status === 'pending' || d.status === 'assigned').length,
+    inTransit: deliveries.filter(d => d.status === 'in-transit').length,
+    highPriority: deliveries.filter(d => d.priority === 'high').length
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold bg-gradient-to-r from-orange-600 to-red-600 bg-clip-text text-transparent">
             Assigned Deliveries
           </h1>
-          <p className="text-muted-foreground mt-1">
-            You have {deliveries.length} deliveries scheduled for today
+          <p className="text-gray-500 mt-1">
+            You have {filteredDeliveries.length} deliveries scheduled
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button size="sm" className="bg-gradient-to-r from-orange-600 to-red-600">
-            <Navigation className="h-4 w-4 mr-2" />
-            Optimize Route
-          </Button>
-        </div>
+        <Button variant="outline" size="sm" onClick={() => fetchAssignedDeliveries()}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Refresh
+        </Button>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -125,12 +308,13 @@ export default function AssignedDeliveries() {
                 <Package className="h-4 w-4 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Total</p>
-                <p className="text-2xl font-bold">8</p>
+                <p className="text-sm text-gray-500">Total</p>
+                <p className="text-xl font-bold text-gray-800">{stats.total}</p>
               </div>
             </div>
           </CardContent>
         </Card>
+
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -138,25 +322,27 @@ export default function AssignedDeliveries() {
                 <Clock className="h-4 w-4 text-yellow-600" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Pending</p>
-                <p className="text-2xl font-bold">5</p>
+                <p className="text-sm text-gray-500">Pending</p>
+                <p className="text-xl font-bold text-gray-800">{stats.pending}</p>
               </div>
             </div>
           </CardContent>
         </Card>
+
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center">
-                <CheckCircle className="h-4 w-4 text-green-600" />
+              <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                <Navigation className="h-4 w-4 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Completed</p>
-                <p className="text-2xl font-bold">3</p>
+                <p className="text-sm text-gray-500">In Transit</p>
+                <p className="text-xl font-bold text-gray-800">{stats.inTransit}</p>
               </div>
             </div>
           </CardContent>
         </Card>
+
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center gap-2">
@@ -164,150 +350,191 @@ export default function AssignedDeliveries() {
                 <AlertCircle className="h-4 w-4 text-red-600" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">High Priority</p>
-                <p className="text-2xl font-bold">2</p>
+                <p className="text-sm text-gray-500">High Priority</p>
+                <p className="text-xl font-bold text-gray-800">{stats.highPriority}</p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Search and Filters */}
+      {/* Search and Filter */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <Input
-                placeholder="Search by ID, woman name, address..."
-                className="pl-10"
+                placeholder="Search by name or address..."
+                className="pl-9"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[150px]">
                 <Filter className="h-4 w-4 mr-2" />
-                Filter
-              </Button>
-              <Button variant="outline" size="sm">
-                <SortAsc className="h-4 w-4 mr-2" />
-                Sort
-              </Button>
-            </div>
+                Status
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="assigned">Assigned</SelectItem>
+                <SelectItem value="in-transit">In Transit</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </CardContent>
       </Card>
 
-      {/* Tabs */}
-      <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-        <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="pending">Pending</TabsTrigger>
-          <TabsTrigger value="in-transit">In Transit</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="all" className="space-y-4 mt-4">
-          {filteredDeliveries.map((delivery, idx) => (
-            <Card key={delivery.id} className="group hover:shadow-xl transition-all animate-slide-in" style={{ animationDelay: `${idx * 100}ms` }}>
-              <CardContent className="p-4">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="flex items-start gap-3 flex-1">
-                    <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      <Package className="h-6 w-6 text-primary" />
-                    </div>
+      {/* Deliveries List */}
+      {filteredDeliveries.length === 0 ? (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-700 mb-2">No deliveries assigned</h3>
+            <p className="text-gray-500">You'll see your assigned deliveries here</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {filteredDeliveries.map((delivery) => {
+            const items = parseItems(delivery.items);
+            
+            return (
+              <Card key={delivery.id} className="hover:shadow-lg transition-shadow">
+                <CardContent className="p-6">
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    {/* Left Section - Main Info */}
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold text-lg">{delivery.womanName}</h3>
-                        <Badge className={getPriorityColor(delivery.priority)}>
-                          {delivery.priority} priority
-                        </Badge>
-                        {delivery.status === 'in-transit' && (
-                          <Badge variant="outline" className="bg-blue-100 text-blue-800">
-                            <Navigation className="h-3 w-3 mr-1 animate-pulse" />
-                            In Transit
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <h3 className="text-xl font-semibold text-gray-800">
+                          {delivery.woman_name || 'Unknown'}
+                        </h3>
+                        {delivery.priority && (
+                          <Badge className={getPriorityColor(delivery.priority)}>
+                            {delivery.priority} priority
                           </Badge>
                         )}
-                      </div>
-                      
-                      <p className="text-sm text-muted-foreground flex items-center gap-1 mt-1">
-                        <MapPin className="h-3 w-3" />
-                        {delivery.address}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-3 mt-2">
-                        <Badge variant="outline" className="text-xs">
-                          <Calendar className="h-3 w-3 mr-1" />
-                          {delivery.scheduledTime}
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          <Navigation className="h-3 w-3 mr-1" />
-                          {delivery.distance}
-                        </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          <Phone className="h-3 w-3 mr-1" />
-                          {delivery.contact}
+                        <Badge className={getStatusColor(delivery.status)}>
+                          {delivery.status || 'pending'}
                         </Badge>
                       </div>
 
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {delivery.items.map((item, i) => (
-                          <Badge key={i} variant="secondary" className="text-xs">
-                            {item}
-                          </Badge>
-                        ))}
-                      </div>
-
-                      {delivery.instructions && (
-                        <p className="text-xs text-amber-600 bg-amber-50 p-1 rounded mt-2">
-                          📝 {delivery.instructions}
+                      <div className="space-y-2">
+                        <p className="text-sm flex items-center gap-2 text-gray-600">
+                          <MapPin className="h-4 w-4 text-gray-400" />
+                          {delivery.address || 'Address not available'}
                         </p>
+                        
+                        <div className="flex flex-wrap items-center gap-4 text-sm">
+                          <span className="flex items-center gap-1 text-gray-600">
+                            <Calendar className="h-4 w-4 text-gray-400" />
+                            {formatTime(delivery.scheduled_date)}
+                          </span>
+                          <span className="flex items-center gap-1 text-gray-600">
+                            <Navigation className="h-4 w-4 text-gray-400" />
+                            {calculateDistance(delivery.lat, delivery.lng)}
+                          </span>
+                          {delivery.contact && (
+                            <span className="flex items-center gap-1 text-gray-600">
+                              <Phone className="h-4 w-4 text-gray-400" />
+                              {delivery.contact}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Items */}
+                        {items.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {items.map((item, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs bg-gray-50">
+                                <Package className="h-3 w-3 mr-1" />
+                                {item}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Progress Bar */}
+                        {delivery.progress && delivery.status === 'in-transit' && (
+                          <div className="mt-3 space-y-1">
+                            <div className="flex justify-between text-xs">
+                              <span className="text-gray-500">Delivery Progress</span>
+                              <span className="font-medium text-gray-700">{delivery.progress}%</span>
+                            </div>
+                            <Progress value={delivery.progress} className="h-2" />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right Section - Actions */}
+                    <div className="flex lg:flex-col gap-2 lg:min-w-[200px]">
+                      {/* Status Update Buttons */}
+                      {delivery.status === 'assigned' && (
+                        <Button
+                          size="sm"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                          onClick={() => handleStatusUpdate(delivery.id, 'in-transit')}
+                          disabled={updatingId === delivery.id}
+                        >
+                          {updatingId === delivery.id ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Navigation className="h-4 w-4 mr-2" />
+                          )}
+                          Start Delivery
+                        </Button>
                       )}
 
-                      {delivery.progress && (
-                        <div className="mt-3 space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span>Delivery Progress</span>
-                            <span>{delivery.progress}%</span>
-                          </div>
-                          <Progress value={delivery.progress} className="h-1" />
-                        </div>
+                      {delivery.status === 'in-transit' && (
+                        <Button
+                          size="sm"
+                          className="w-full bg-green-600 hover:bg-green-700 text-white"
+                          onClick={() => handleStatusUpdate(delivery.id, 'delivered')}
+                          disabled={updatingId === delivery.id}
+                        >
+                          {updatingId === delivery.id ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Package className="h-4 w-4 mr-2" />
+                          )}
+                          Mark Delivered
+                        </Button>
+                      )}
+
+                      {/* Navigation Button */}
+                      <Button 
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        onClick={() => handleNavigate(delivery)}
+                      >
+                        <Navigation className="h-4 w-4 mr-2" />
+                        Navigate
+                      </Button>
+
+                      {/* Contact Button */}
+                      {delivery.contact && (
+                        <Button 
+                          size="sm"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => handleContact(delivery.contact)}
+                        >
+                          <Phone className="h-4 w-4 mr-2" />
+                          Contact
+                        </Button>
                       )}
                     </div>
                   </div>
-
-                  <div className="flex lg:flex-col gap-2 lg:min-w-[120px]">
-                    <Button size="sm" className="w-full bg-gradient-to-r from-blue-600 to-purple-600">
-                      <Navigation className="h-4 w-4 mr-2" />
-                      Navigate
-                    </Button>
-                    <Button size="sm" variant="outline" className="w-full">
-                      <Phone className="h-4 w-4 mr-2" />
-                      Contact
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </TabsContent>
-
-        <TabsContent value="pending">
-          <div className="text-center py-12">
-            <Clock className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold">No pending deliveries</h3>
-            <p className="text-muted-foreground">Take a break or check back later</p>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="in-transit">
-          <div className="text-center py-12">
-            <Navigation className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold">No active deliveries</h3>
-            <p className="text-muted-foreground">Start a delivery to see progress</p>
-          </div>
-        </TabsContent>
-      </Tabs>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

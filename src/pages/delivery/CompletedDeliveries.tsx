@@ -1,9 +1,13 @@
 // src/pages/delivery/CompletedDeliveries.tsx
-import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useState, useEffect } from "react";
+import { supabase } from "@/services/supabase";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { motion } from "framer-motion";
 import {
   Search,
   CheckCircle,
@@ -11,13 +15,17 @@ import {
   MapPin,
   Package,
   Star,
-  ThumbsUp,
   MessageCircle,
   Download,
   Filter,
   Award,
-  TrendingUp,
-  Clock
+  Clock,
+  Phone,
+  User,
+  DollarSign,
+  Truck,
+  Loader2,
+  RefreshCw
 } from "lucide-react";
 import {
   Select,
@@ -26,224 +34,227 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { format } from "date-fns";
+
+interface Delivery {
+  id: string;
+  order_id: string | null;
+  woman_name: string | null;
+  address: string | null;
+  items: any | null;
+  status: string | null;
+  scheduled_date: string | null;
+  delivery_partner: string | null;
+}
 
 export default function CompletedDeliveries() {
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [filteredDeliveries, setFilteredDeliveries] = useState<Delivery[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [timeFilter, setTimeFilter] = useState("all");
+  const [selectedTab, setSelectedTab] = useState("all");
+  
+  const { toast } = useToast();
 
-  const completedDeliveries = [
-    {
-      id: "DEL001",
-      orderId: "ORD001",
-      womanName: "Priya Sharma",
-      address: "House 123, Block A, Sector 12",
-      items: ["Sanitary Kit", "Nutrition Pack"],
-      completedDate: "2024-02-20",
-      completedTime: "10:30 AM",
-      rating: 5,
-      feedback: "Very prompt and professional service. The delivery person was very courteous.",
-      earnings: 150,
-      distance: "2.5 km",
-      duration: "25 mins"
-    },
-    {
-      id: "DEL002",
-      orderId: "ORD002",
-      womanName: "Sunita Patel",
-      address: "House 45, Block C, Sector 15",
-      items: ["Prenatal Vitamins"],
-      completedDate: "2024-02-20",
-      completedTime: "11:45 AM",
-      rating: 4,
-      feedback: "Good service, on time delivery",
-      earnings: 120,
-      distance: "3.2 km",
-      duration: "30 mins"
-    },
-    {
-      id: "DEL003",
-      orderId: "ORD003",
-      womanName: "Lakshmi Devi",
-      address: "House 67, Block B, Sector 10",
-      items: ["Postnatal Care Kit"],
-      completedDate: "2024-02-19",
-      completedTime: "2:15 PM",
-      rating: 5,
-      feedback: "Excellent care and attention to detail",
-      earnings: 180,
-      distance: "1.8 km",
-      duration: "20 mins"
-    },
-    {
-      id: "DEL004",
-      orderId: "ORD004",
-      womanName: "Kavita Singh",
-      address: "House 89, Block D, Sector 14",
-      items: ["Health Supplements"],
-      completedDate: "2024-02-19",
-      completedTime: "4:30 PM",
-      rating: 5,
-      feedback: "Very helpful, explained the contents well",
-      earnings: 100,
-      distance: "4.1 km",
-      duration: "35 mins"
-    },
-    {
-      id: "DEL005",
-      orderId: "ORD005",
-      womanName: "Meena Kumari",
-      address: "House 234, Block E, Sector 16",
-      items: ["Emergency Kit"],
-      completedDate: "2024-02-18",
-      completedTime: "9:45 AM",
-      rating: 4,
-      feedback: "Good service",
-      earnings: 140,
-      distance: "3.5 km",
-      duration: "28 mins"
+  // Fetch deliveries from Supabase
+  useEffect(() => {
+    fetchDeliveries();
+  }, []);
+
+  useEffect(() => {
+    filterDeliveries();
+  }, [searchTerm, timeFilter, selectedTab, deliveries]);
+
+  const fetchDeliveries = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('deliveries')
+        .select('*')
+        .order('scheduled_date', { ascending: false });
+
+      if (error) throw error;
+
+      console.log('Fetched deliveries:', data); // Debug log
+      setDeliveries(data || []);
+      setFilteredDeliveries(data || []);
+    } catch (error) {
+      console.error('Error fetching deliveries:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load deliveries",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-  ];
-
-  const stats = {
-    totalDeliveries: completedDeliveries.length,
-    totalEarnings: completedDeliveries.reduce((sum, d) => sum + d.earnings, 0),
-    averageRating: (completedDeliveries.reduce((sum, d) => sum + d.rating, 0) / completedDeliveries.length).toFixed(1),
-    totalDistance: completedDeliveries.reduce((sum, d) => sum + parseFloat(d.distance), 0).toFixed(1)
   };
 
-  const filteredDeliveries = completedDeliveries.filter(d =>
-    d.womanName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    d.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    d.orderId.toLowerCase().includes(searchTerm.toLowerCase())
+  const filterDeliveries = () => {
+    let filtered = [...deliveries];
+
+    // Filter by status based on selected tab
+    if (selectedTab === "completed") {
+      filtered = filtered.filter(d => d.status === 'delivered');
+    } else if (selectedTab === "high-rated") {
+      // For now, just show delivered items
+      filtered = filtered.filter(d => d.status === 'delivered');
+    }
+
+    // Search filter
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(d => 
+        d.woman_name?.toLowerCase().includes(term) ||
+        d.id?.toLowerCase().includes(term) ||
+        d.order_id?.toLowerCase().includes(term) ||
+        d.address?.toLowerCase().includes(term)
+      );
+    }
+
+    // Time filter
+    if (timeFilter !== "all") {
+      const now = new Date();
+      filtered = filtered.filter(d => {
+        if (!d.scheduled_date) return false;
+        const deliveryDate = new Date(d.scheduled_date);
+        const diffDays = Math.floor((now.getTime() - deliveryDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (timeFilter === "today") return diffDays === 0;
+        if (timeFilter === "week") return diffDays <= 7;
+        if (timeFilter === "month") return diffDays <= 30;
+        return true;
+      });
+    }
+
+    setFilteredDeliveries(filtered);
+  };
+
+  // Calculate stats for completed deliveries only
+  const completedDeliveries = deliveries.filter(d => d.status === 'delivered');
+  
+  const stats = {
+    total: completedDeliveries.length,
+    earnings: completedDeliveries.length * 150, // Mock earnings calculation
+    avgRating: 4.8, // Mock rating
+    fiveStar: Math.floor(completedDeliveries.length * 0.8) // Mock five-star count
+  };
+
+  const StatCard = ({ title, value, icon: Icon, color, subtitle }: any) => (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ scale: 1.02 }}
+      className={`bg-${color}-50 rounded-xl p-4 border border-${color}-200 shadow-sm`}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-gray-600">{title}</p>
+          <p className="text-2xl font-bold text-gray-800 mt-1">{value}</p>
+          {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+        </div>
+        <div className={`h-12 w-12 rounded-full bg-${color}-100 flex items-center justify-center`}>
+          <Icon className={`h-6 w-6 text-${color}-600`} />
+        </div>
+      </div>
+    </motion.div>
   );
 
-  const getRecentFeedback = () => {
-    return completedDeliveries
-      .filter(d => d.feedback)
-      .slice(0, 3);
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="text-gray-500">Loading deliveries...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 p-6 bg-gray-50 min-h-screen">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex justify-between items-center"
+      >
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
-            Completed Deliveries
-          </h1>
-          <p className="text-muted-foreground mt-1">
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+              Completed Deliveries
+            </h1>
+            <Badge className="bg-green-100 text-green-700 border-green-200">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              {completedDeliveries.length} Completed
+            </Badge>
+          </div>
+          <p className="text-gray-500 mt-1">
             History of all your successful deliveries
           </p>
         </div>
-        <Button variant="outline" size="sm">
-          <Download className="h-4 w-4 mr-2" />
-          Download Report
-        </Button>
-      </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={fetchDeliveries}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+          <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700">
+            <Download className="h-4 w-4 mr-2" />
+            Download Report
+          </Button>
+        </div>
+      </motion.div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="bg-gradient-to-br from-green-500 to-emerald-600 text-white">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm opacity-90">Total Deliveries</p>
-                <p className="text-3xl font-bold mt-1">{stats.totalDeliveries}</p>
-              </div>
-              <Package className="h-8 w-8 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-blue-500 to-cyan-600 text-white">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm opacity-90">Total Earnings</p>
-                <p className="text-3xl font-bold mt-1">₹{stats.totalEarnings}</p>
-              </div>
-              <TrendingUp className="h-8 w-8 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-yellow-500 to-orange-600 text-white">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm opacity-90">Average Rating</p>
-                <p className="text-3xl font-bold mt-1">{stats.averageRating}</p>
-              </div>
-              <Star className="h-8 w-8 opacity-80 fill-white" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-purple-500 to-pink-600 text-white">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm opacity-90">Total Distance</p>
-                <p className="text-3xl font-bold mt-1">{stats.totalDistance}km</p>
-              </div>
-              <MapPin className="h-8 w-8 opacity-80" />
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard
+          title="Total Deliveries"
+          value={stats.total}
+          icon={Package}
+          color="blue"
+          subtitle="Completed"
+        />
+        <StatCard
+          title="Total Earnings"
+          value={`₹${stats.earnings}`}
+          icon={DollarSign}
+          color="green"
+          subtitle="This month"
+        />
+        <StatCard
+          title="Average Rating"
+          value={stats.avgRating.toFixed(1)}
+          icon={Star}
+          color="yellow"
+          subtitle={`${stats.fiveStar} five-star`}
+        />
+        <StatCard
+          title="On-Time Rate"
+          value="98%"
+          icon={Truck}
+          color="purple"
+          subtitle="Performance"
+        />
       </div>
 
-      {/* Recent Feedback Section */}
-      <Card className="border-2 border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-yellow-700">
-            <MessageCircle className="h-5 w-5" />
-            Recent Customer Feedback
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
-            {getRecentFeedback().map((delivery, idx) => (
-              <Card key={idx} className="bg-white dark:bg-gray-900">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className="flex">
-                      {[...Array(5)].map((_, i) => (
-                        <Star
-                          key={i}
-                          className={`h-4 w-4 ${
-                            i < delivery.rating ? 'fill-yellow-500 text-yellow-500' : 'text-gray-300'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                    <span className="text-xs text-muted-foreground">{delivery.completedDate}</span>
-                  </div>
-                  <p className="text-sm mb-2">"{delivery.feedback}"</p>
-                  <p className="text-xs font-medium">— {delivery.womanName}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Search and Filter */}
-      <Card>
+      {/* Filters */}
+      <Card className="border border-gray-200 shadow-sm">
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row gap-4">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <Input
                 placeholder="Search by ID, order ID, or woman name..."
-                className="pl-10"
+                className="pl-9 border-gray-200 focus:border-blue-300"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <Select value={timeFilter} onValueChange={setTimeFilter}>
-              <SelectTrigger className="w-[180px]">
-                <Filter className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Filter by date" />
+              <SelectTrigger className="w-[140px] border-gray-200">
+                <Calendar className="h-4 w-4 mr-2 text-gray-400" />
+                <SelectValue placeholder="Time" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Time</SelectItem>
@@ -256,103 +267,143 @@ export default function CompletedDeliveries() {
         </CardContent>
       </Card>
 
-      {/* Completed Deliveries Grid */}
+      {/* Tabs */}
+      <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+        <TabsList className="bg-gray-100 p-1">
+          <TabsTrigger value="all" className="data-[state=active]:bg-white">
+            All Deliveries
+          </TabsTrigger>
+          <TabsTrigger value="completed" className="data-[state=active]:bg-white">
+            Completed
+          </TabsTrigger>
+          <TabsTrigger value="high-rated" className="data-[state=active]:bg-white">
+            High Rated
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {/* Deliveries Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {filteredDeliveries.map((delivery, idx) => (
-          <Card key={delivery.id} className="group hover:shadow-xl transition-all animate-slide-in" style={{ animationDelay: `${idx * 100}ms` }}>
-            <CardContent className="p-4">
-              {/* Header */}
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="h-5 w-5 text-green-500" />
-                    <span className="font-semibold">{delivery.id}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Order: {delivery.orderId}</p>
-                </div>
-                <Badge variant="success" className="bg-green-100">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Completed
-                </Badge>
-              </div>
-
-              {/* Woman Info */}
-              <h3 className="font-semibold text-lg">{delivery.womanName}</h3>
-              <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
-                <MapPin className="h-3 w-3 shrink-0" />
-                <span className="truncate">{delivery.address}</span>
-              </div>
-
-              {/* Items */}
-              <div className="mt-3">
-                <p className="text-xs text-muted-foreground mb-1">Items delivered:</p>
-                <div className="flex flex-wrap gap-1">
-                  {delivery.items.map((item, i) => (
-                    <Badge key={i} variant="secondary" className="text-xs">
-                      {item}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-
-              {/* Delivery Details Grid */}
-              <div className="grid grid-cols-2 gap-2 mt-3 text-sm bg-muted/30 p-3 rounded-lg">
-                <div className="flex items-center gap-1">
-                  <Calendar className="h-3 w-3 text-muted-foreground" />
-                  <span>{delivery.completedDate}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Clock className="h-3 w-3 text-muted-foreground" />
-                  <span>{delivery.completedTime}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <MapPin className="h-3 w-3 text-muted-foreground" />
-                  <span>{delivery.distance}</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Package className="h-3 w-3 text-muted-foreground" />
-                  <span>{delivery.duration}</span>
-                </div>
-              </div>
-
-              {/* Rating and Earnings */}
-              <div className="flex items-center justify-between mt-3">
-                <div className="flex items-center gap-1">
-                  {[...Array(5)].map((_, i) => (
-                    <Star
-                      key={i}
-                      className={`h-4 w-4 ${
-                        i < delivery.rating ? 'fill-yellow-500 text-yellow-500' : 'text-gray-300'
-                      }`}
-                    />
-                  ))}
-                </div>
-                <Badge variant="outline" className="bg-green-100">
-                  <Award className="h-3 w-3 mr-1" />
-                  +₹{delivery.earnings}
-                </Badge>
-              </div>
-
-              {/* Feedback (if exists) */}
-              {delivery.feedback && (
-                <div className="mt-3 p-2 bg-blue-50 dark:bg-blue-950/20 rounded-lg">
-                  <p className="text-xs italic">"{delivery.feedback}"</p>
-                </div>
-              )}
+        {filteredDeliveries.length === 0 ? (
+          <Card className="col-span-full border border-gray-200">
+            <CardContent className="p-12 text-center">
+              <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-700 mb-2">No deliveries found</h3>
+              <p className="text-gray-500">
+                {searchTerm || timeFilter !== 'all'
+                  ? "Try adjusting your filters"
+                  : "No deliveries in the system yet"}
+              </p>
             </CardContent>
           </Card>
-        ))}
+        ) : (
+          filteredDeliveries.map((delivery, index) => (
+            <motion.div
+              key={delivery.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
+            >
+              <Card className="border border-gray-200 hover:shadow-lg transition-shadow overflow-hidden">
+                {/* Status color bar */}
+                <div className={`h-1 w-full ${
+                  delivery.status === 'delivered' ? 'bg-green-400' :
+                  delivery.status === 'in-transit' ? 'bg-blue-400' :
+                  delivery.status === 'pending' ? 'bg-yellow-400' :
+                  'bg-gray-400'
+                }`} />
+                
+                <CardContent className="p-5">
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="font-semibold text-gray-800">{delivery.id}</p>
+                      <p className="text-xs text-gray-500">Order: {delivery.order_id}</p>
+                    </div>
+                    <Badge className={
+                      delivery.status === 'delivered' ? 'bg-green-100 text-green-700 border-green-200' :
+                      delivery.status === 'in-transit' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                      delivery.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
+                      'bg-gray-100 text-gray-700 border-gray-200'
+                    }>
+                      {delivery.status}
+                    </Badge>
+                  </div>
+
+                  {/* Woman Info */}
+                  <h3 className="font-semibold text-lg text-gray-800">{delivery.woman_name}</h3>
+                  <div className="flex items-center gap-1 text-sm text-gray-500 mt-1">
+                    <MapPin className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{delivery.address || 'Address not available'}</span>
+                  </div>
+
+                  {/* Items */}
+                  {delivery.items && (
+                    <div className="mt-3">
+                      <p className="text-xs text-gray-500 mb-1">Items:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {(Array.isArray(delivery.items) ? delivery.items : []).map((item, i) => (
+                          <Badge key={i} variant="outline" className="text-xs bg-gray-50 border-gray-200">
+                            {typeof item === 'string' ? item : 'Item'}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Date */}
+                  <div className="mt-3 text-sm bg-gray-50 p-3 rounded-lg">
+                    <div className="flex items-center gap-1">
+                      <Calendar className="h-3 w-3 text-gray-400" />
+                      <span className="text-gray-600">
+                        {delivery.scheduled_date ? format(new Date(delivery.scheduled_date), 'dd MMM yyyy') : 'Date not set'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* For delivered items, show completed badge */}
+                  {delivery.status === 'delivered' && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <Badge className="bg-green-100 text-green-700 border-green-200">
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Completed
+                      </Badge>
+                      <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+                        <Award className="h-3 w-3 mr-1" />
+                        +₹150
+                      </Badge>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))
+        )}
       </div>
 
-      {/* Empty State */}
-      {filteredDeliveries.length === 0 && (
-        <Card>
-          <CardContent className="p-12 text-center">
-            <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No completed deliveries found</h3>
-            <p className="text-muted-foreground">
-              {searchTerm ? "Try adjusting your search" : "Complete your first delivery to see it here"}
-            </p>
+      {/* Summary Footer - Only show if there are completed deliveries */}
+      {completedDeliveries.length > 0 && (
+        <Card className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-0">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 bg-white/20 rounded-full flex items-center justify-center">
+                  <Award className="h-6 w-6 text-yellow-300" />
+                </div>
+                <div>
+                  <p className="text-sm text-blue-100">Total Completed</p>
+                  <p className="text-2xl font-bold">{completedDeliveries.length} Deliveries</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-sm text-blue-100">Success Rate</p>
+                  <p className="text-2xl font-bold">
+                    {Math.round((completedDeliveries.length / deliveries.length) * 100)}%
+                  </p>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

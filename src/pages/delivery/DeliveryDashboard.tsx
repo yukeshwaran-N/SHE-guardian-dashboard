@@ -1,624 +1,513 @@
-// src/pages/admin/DeliveryDashboard.tsx
+// src/pages/delivery/DeliveryDashboard.tsx
 import { useState, useEffect } from "react";
-import { deliveriesService } from "@/services/deliveriesService";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/services/supabase";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { motion } from "framer-motion";
 import {
   Truck,
-  Search,
-  Filter,
-  Download,
-  MapPin,
-  Phone,
-  Calendar,
   Package,
   CheckCircle,
   Clock,
-  AlertCircle,
-  User,
-  Plus,
-  RefreshCw,
-  Star,
-  TrendingUp,
-  TrendingDown,
-  Activity,
   Navigation,
-  Printer,
-  Mail,
-  Share2,
-  BarChart3,
-  PieChart,
-  Clock4,
-  CheckCheck,
-  XCircle,
-  ArrowUpRight,
-  ArrowDownRight,
+  Phone,
+  Star,
   Award,
-  Zap,
-  Shield,
-  Heart,
-  Users,
-  Map,
-  Layers
+  TrendingUp,
+  Calendar,
+  User,
+  MapPin,
+  DollarSign,
+  Loader2,
+  Sparkles
 } from "lucide-react";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart as RePieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  Legend
-} from 'recharts';
-import { format, formatDistance } from 'date-fns';
+import { format } from "date-fns";
 
-interface Delivery {
-  id: string;
-  order_id: string | null;
-  woman_name: string | null;
-  address: string | null;
-  items: any | null;
-  status: string | null;
-  scheduled_date: string | null;
-  delivery_partner: string | null;
-  contact?: string;
-  priority?: 'high' | 'medium' | 'low';
-}
-
-export default function DeliveryDashboard() {
-  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
-  const [filteredDeliveries, setFilteredDeliveries] = useState<Delivery[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('week');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [showAnalytics, setShowAnalytics] = useState(false);
+// Vehicle animation component (kept as requested)
+const MovingVehicle = () => {
+  const [position, setPosition] = useState(0);
+  const [direction, setDirection] = useState(1);
 
   useEffect(() => {
-    fetchDeliveries();
-    // Simulate real-time updates
     const interval = setInterval(() => {
-      fetchDeliveries(true);
-    }, 30000); // Refresh every 30 seconds
-    
+      setPosition(prev => {
+        const newPos = prev + direction * 0.5;
+        if (newPos >= 90 || newPos <= 0) {
+          setDirection(d => -d);
+          return prev;
+        }
+        return newPos;
+      });
+    }, 50);
     return () => clearInterval(interval);
-  }, []);
+  }, [direction]);
 
-  useEffect(() => {
-    let filtered = deliveries;
-    if (searchTerm) {
-      filtered = filtered.filter(d =>
-        d.woman_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        d.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        d.address?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    if (statusFilter !== "all") {
-      filtered = filtered.filter(d => d.status === statusFilter);
-    }
-    setFilteredDeliveries(filtered);
-  }, [searchTerm, statusFilter, deliveries]);
-
-  const fetchDeliveries = async (silent = false) => {
-    if (!silent) setLoading(true);
-    try {
-      const data = await deliveriesService.getAllDeliveries();
-      setDeliveries(data);
-      if (!silent) setFilteredDeliveries(data);
-    } catch (error) {
-      console.error("Error fetching deliveries:", error);
-    } finally {
-      if (!silent) setLoading(false);
-    }
-  };
-
-  // Statistics with animations
-  const stats = {
-    total: deliveries.length,
-    delivered: deliveries.filter(d => d.status === 'delivered').length,
-    inTransit: deliveries.filter(d => d.status === 'in-transit').length,
-    pending: deliveries.filter(d => d.status === 'pending' || d.status === 'assigned').length,
-    cancelled: deliveries.filter(d => d.status === 'cancelled').length,
-    onTimeRate: calculateOnTimeRate(deliveries),
-    avgDeliveryTime: calculateAvgDeliveryTime(deliveries)
-  };
-
-  // Chart data
-  const statusData = [
-    { name: 'Delivered', value: stats.delivered, color: '#10b981' },
-    { name: 'In Transit', value: stats.inTransit, color: '#3b82f6' },
-    { name: 'Pending', value: stats.pending, color: '#f59e0b' },
-    { name: 'Cancelled', value: stats.cancelled, color: '#ef4444' },
-  ];
-
-  const weeklyData = generateWeeklyData(deliveries);
-  const partnerPerformance = generatePartnerPerformance(deliveries);
-
-  // Helper functions
-  function calculateOnTimeRate(deliveries: Delivery[]) {
-    const delivered = deliveries.filter(d => d.status === 'delivered');
-    if (delivered.length === 0) return 100;
-    // This is a mock calculation - replace with actual logic
-    return 94;
-  }
-
-  function calculateAvgDeliveryTime(deliveries: Delivery[]) {
-    // Mock calculation - replace with actual logic
-    return '2.5 hrs';
-  }
-
-  function generateWeeklyData(deliveries: Delivery[]) {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    return days.map(day => ({
-      day,
-      deliveries: Math.floor(Math.random() * 10) + 5,
-      completed: Math.floor(Math.random() * 8) + 3
-    }));
-  }
-
-  function generatePartnerPerformance(deliveries: Delivery[]) {
-    return [
-      { name: 'Rajesh Kumar', deliveries: 45, rating: 4.8, onTime: 98 },
-      { name: 'Meena Devi', deliveries: 38, rating: 4.9, onTime: 99 },
-      { name: 'Suresh Singh', deliveries: 42, rating: 4.7, onTime: 95 },
-      { name: 'Priya ASHA', deliveries: 35, rating: 4.8, onTime: 97 },
-    ];
-  }
-
-  const getStatusIcon = (status: string | null) => {
-    switch(status) {
-      case 'delivered': return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'in-transit': return <Truck className="h-5 w-5 text-blue-500 animate-pulse" />;
-      case 'assigned': return <User className="h-5 w-5 text-yellow-500" />;
-      case 'pending': return <Clock className="h-5 w-5 text-orange-500" />;
-      case 'cancelled': return <XCircle className="h-5 w-5 text-red-500" />;
-      default: return <Package className="h-5 w-5 text-gray-500" />;
-    }
-  };
-
-  const getStatusColor = (status: string | null) => {
-    switch(status) {
-      case 'delivered': return 'bg-green-100 text-green-800 border-green-200';
-      case 'in-transit': return 'bg-blue-100 text-blue-800 border-blue-200 animate-pulse';
-      case 'assigned': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'pending': return 'bg-orange-100 text-orange-800 border-orange-200';
-      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const StatCard = ({ title, value, icon: Icon, trend, trendValue, color, subtitle }: any) => (
-    <Card className="relative overflow-hidden group hover:shadow-lg transition-all duration-300">
-      <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-10 transition-opacity duration-300`} />
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-3xl font-bold mt-2">{value}</h3>
-              {trend && (
-                <span className={`text-sm flex items-center ${trend > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {trend > 0 ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-                  {Math.abs(trend)}%
-                </span>
-              )}
-            </div>
-            {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
+  return (
+    <div className="relative h-32 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg overflow-hidden shadow-lg">
+      {/* Road lines */}
+      <div className="absolute bottom-8 w-full h-0.5 bg-white/30">
+        <motion.div
+          className="absolute h-full w-16 bg-white"
+          animate={{ x: ['-100%', '100%'] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+        />
+      </div>
+      
+      {/* Moving vehicle */}
+      <motion.div
+        className="absolute bottom-4"
+        animate={{ left: `${position}%` }}
+        transition={{ type: "tween", ease: "linear", duration: 0.05 }}
+      >
+        <div className="relative">
+          <div className="w-16 h-8 bg-blue-400 rounded-lg shadow-lg flex items-center justify-center border-2 border-white/30">
+            <Truck className="h-5 w-5 text-white" />
           </div>
-          <div className={`h-12 w-12 rounded-full bg-${color.split(' ')[0]}-100 flex items-center justify-center group-hover:scale-110 transition-transform`}>
-            <Icon className={`h-6 w-6 text-${color.split(' ')[0]}-600`} />
+          <div className="absolute -bottom-2 left-1 w-3 h-3 bg-gray-800 rounded-full border border-gray-600" />
+          <div className="absolute -bottom-2 right-1 w-3 h-3 bg-gray-800 rounded-full border border-gray-600" />
+          <div className="absolute right-0 top-2 w-2 h-2 bg-yellow-300 rounded-full animate-pulse" />
+        </div>
+      </motion.div>
+
+      <div className="absolute top-2 right-2 bg-black/40 rounded-lg px-3 py-1 text-white text-sm backdrop-blur-sm">
+        <span className="flex items-center gap-1">
+          <TrendingUp className="h-3 w-3 text-yellow-400" />
+          On Route
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// Delivery Partner Card - Shows essential info
+const DeliveryPartnerCard = () => {
+  const { user } = useAuth();
+  
+  return (
+    <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-indigo-600 to-blue-600 shadow-xl">
+      <CardContent className="relative p-5 text-white">
+        <div className="flex items-center gap-4">
+          <Avatar className="h-16 w-16 border-2 border-white shadow-lg">
+            <AvatarFallback className="bg-white text-indigo-700 text-xl font-bold">
+              {user?.id?.slice(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div>
+            <h3 className="text-xl font-bold">{user?.id || 'Partner'}</h3>
+            <Badge className="bg-yellow-500 text-white border-0 text-xs mt-1">
+              <Star className="h-3 w-3 mr-1 fill-white" />
+              Gold Status
+            </Badge>
           </div>
         </div>
       </CardContent>
     </Card>
   );
+};
+
+// Current Task Card - Shows active delivery
+const CurrentTaskCard = ({ task, onNavigate, onCall }: any) => {
+  if (!task) return null;
+
+  return (
+    <Card className="bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-xl border-0">
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <Badge className="bg-white/20 text-white border-white/30">
+            <Truck className="h-3 w-3 mr-1" />
+            Current Task
+          </Badge>
+          <Badge className="bg-white/20 text-white border-white/30">
+            <Clock className="h-3 w-3 mr-1" />
+            ETA: {task.eta}
+          </Badge>
+        </div>
+
+        <h3 className="text-xl font-bold">{task.woman_name}</h3>
+        <p className="text-blue-100 text-sm mt-1 flex items-center gap-1">
+          <MapPin className="h-3 w-3" />
+          {task.address}
+        </p>
+
+        <div className="flex items-center gap-4 mt-3 text-sm text-blue-100">
+          <span className="flex items-center gap-1">
+            <Package className="h-3 w-3" />
+            {task.items?.length || 0} items
+          </span>
+          <span className="flex items-center gap-1">
+            <Navigation className="h-3 w-3" />
+            {task.distance}
+          </span>
+        </div>
+
+        {task.progress && (
+          <div className="mt-3">
+            <div className="flex justify-between text-xs text-blue-100 mb-1">
+              <span>Progress</span>
+              <span>{task.progress}%</span>
+            </div>
+            <Progress value={task.progress} className="h-2 bg-white/30" indicatorClassName="bg-white" />
+          </div>
+        )}
+
+        <div className="flex gap-2 mt-4">
+          <Button 
+            className="flex-1 bg-white text-blue-600 hover:bg-gray-100 font-medium"
+            onClick={onNavigate}
+          >
+            <Navigation className="h-4 w-4 mr-2" />
+            Navigate
+          </Button>
+          <Button 
+            variant="outline" 
+            className="flex-1 bg-transparent border-white/30 text-white hover:bg-white/20"
+            onClick={onCall}
+          >
+            <Phone className="h-4 w-4 mr-2" />
+            Call
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
+export default function DeliveryDashboard() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
+  const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [greeting, setGreeting] = useState('');
+  const [stats, setStats] = useState({
+    todayDeliveries: 0,
+    completed: 0,
+    pending: 0,
+    earnings: 0,
+    rating: 0
+  });
+  const [currentTask, setCurrentTask] = useState<any>(null);
+  const [upcomingDeliveries, setUpcomingDeliveries] = useState<any[]>([]);
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting('Good Morning');
+    else if (hour < 17) setGreeting('Good Afternoon');
+    else setGreeting('Good Evening');
+
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [user]);
+
+  const fetchDashboardData = async () => {
+    if (!user?.id) return;
+    
+    setLoading(true);
+    try {
+      // Get today's deliveries
+      const today = new Date().toISOString().split('T')[0];
+      
+      const { data: deliveries, error } = await supabase
+        .from('deliveries')
+        .select('*')
+        .eq('delivery_partner', user.id)
+        .order('scheduled_date', { ascending: true });
+
+      if (error) throw error;
+
+      // Calculate stats
+      const todayDeliveries = deliveries?.filter(d => 
+        d.scheduled_date === today
+      ).length || 0;
+
+      const completed = deliveries?.filter(d => 
+        d.status === 'delivered'
+      ).length || 0;
+
+      const pending = deliveries?.filter(d => 
+        d.status === 'pending' || d.status === 'assigned'
+      ).length || 0;
+
+      // Get current task (first in-transit or assigned delivery)
+      const current = deliveries?.find(d => 
+        d.status === 'in-transit' || d.status === 'assigned'
+      );
+
+      if (current) {
+        setCurrentTask({
+          id: current.id,
+          woman_name: current.woman_name,
+          address: current.address,
+          items: current.items,
+          distance: '2.5 km', // Calculate from coordinates
+          eta: '15 min',
+          progress: current.status === 'in-transit' ? 65 : 25
+        });
+      }
+
+      // Get upcoming deliveries (next 3 pending)
+      const upcoming = deliveries
+        ?.filter(d => d.status === 'pending' || d.status === 'assigned')
+        .slice(0, 3)
+        .map(d => ({
+          id: d.id,
+          woman_name: d.woman_name,
+          address: d.address,
+          time: d.scheduled_date ? format(new Date(d.scheduled_date), 'h:mm a') : 'TBD'
+        })) || [];
+
+      setUpcomingDeliveries(upcoming);
+
+      setStats({
+        todayDeliveries,
+        completed,
+        pending,
+        earnings: completed * 150, // ₹150 per delivery
+        rating: 4.8 // Get from ratings table
+      });
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load dashboard",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNavigate = () => {
+    if (currentTask) {
+      navigate('/delivery/map', {
+        state: {
+          id: currentTask.id,
+          lat: 28.6139, // Get from database
+          lng: 77.2090,
+          address: currentTask.address,
+          womanName: currentTask.woman_name
+        }
+      });
+    }
+  };
+
+  const handleCall = () => {
+    // Implement call functionality
+    toast({
+      title: "Calling",
+      description: "Connecting to customer...",
+    });
+  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="text-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="text-muted-foreground animate-pulse">Loading delivery dashboard...</p>
-        </div>
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Header with Live Status */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-              Delivery Operations
-            </h1>
-            <Badge variant="outline" className="animate-pulse bg-green-100 text-green-800">
-              <span className="h-2 w-2 bg-green-500 rounded-full mr-2 animate-ping"></span>
-              Live
-            </Badge>
+    <div className="space-y-6 p-6 bg-gray-50 min-h-screen">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex justify-between items-center"
+      >
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold text-gray-800">{greeting}, {user?.id}!</h1>
+            <motion.div
+              animate={{ rotate: [0, 10, -10, 0] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            >
+              <Sparkles className="h-6 w-6 text-yellow-500" />
+            </motion.div>
           </div>
-          <p className="text-muted-foreground flex items-center gap-2">
-            <Activity className="h-4 w-4" />
-            Real-time tracking and management of all health kit deliveries
+          <p className="text-gray-500">
+            {format(currentTime, "EEEE, MMMM do, yyyy • h:mm a")}
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => fetchDeliveries()} className="relative">
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Auto-refresh (30s)
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowAnalytics(!showAnalytics)}>
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Analytics
-          </Button>
-          <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
-            <Plus className="h-4 w-4 mr-2" />
-            New Delivery
-          </Button>
-        </div>
-      </div>
+        <Badge className="bg-green-100 text-green-700 border-green-200 px-3 py-1">
+          <span className="h-2 w-2 bg-green-500 rounded-full mr-2 animate-ping" />
+          Online
+        </Badge>
+      </motion.div>
 
-      {/* Analytics Section - Toggleable */}
-      {showAnalytics && (
-        <Card className="border-2 border-primary/20 bg-gradient-to-br from-blue-50 to-purple-50 dark:from-gray-900 dark:to-gray-800">
-          <CardContent className="p-6">
-            <Tabs defaultValue="overview" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="overview">Overview</TabsTrigger>
-                <TabsTrigger value="trends">Trends</TabsTrigger>
-                <TabsTrigger value="performance">Performance</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="overview" className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="h-[300px]">
-                    <h3 className="text-sm font-medium mb-2">Delivery Status Distribution</h3>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <RePieChart>
-                        <Pie
-                          data={statusData.filter(d => d.value > 0)}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={80}
-                          paddingAngle={5}
-                          dataKey="value"
-                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                        >
-                          {statusData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </RePieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="h-[300px]">
-                    <h3 className="text-sm font-medium mb-2">Weekly Delivery Trends</h3>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={weeklyData}>
-                        <defs>
-                          <linearGradient id="colorDeliveries" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="day" />
-                        <YAxis />
-                        <Tooltip />
-                        <Area type="monotone" dataKey="deliveries" stroke="#3b82f6" fillOpacity={1} fill="url(#colorDeliveries)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </TabsContent>
+      {/* Vehicle Animation */}
+      <MovingVehicle />
 
-              <TabsContent value="performance">
-                <div className="grid gap-4 md:grid-cols-2">
-                  {partnerPerformance.map((partner, idx) => (
-                    <Card key={idx}>
-                      <CardContent className="p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-8 w-8">
-                              <AvatarFallback>{partner.name[0]}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">{partner.name}</p>
-                              <p className="text-xs text-muted-foreground">{partner.deliveries} deliveries</p>
-                            </div>
-                          </div>
-                          <Badge variant="outline" className="bg-green-100">
-                            {partner.onTime}% on time
-                          </Badge>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {[...Array(5)].map((_, i) => (
-                            <Star key={i} className={`h-3 w-3 ${i < Math.floor(partner.rating) ? 'fill-yellow-500 text-yellow-500' : 'text-gray-300'}`} />
-                          ))}
-                          <span className="text-xs ml-1">{partner.rating}</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </TabsContent>
-            </Tabs>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                <Package className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Today's Deliveries</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.todayDeliveries}</p>
+              </div>
+            </div>
           </CardContent>
         </Card>
-      )}
 
-      {/* Stats Grid with Live Updates */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Deliveries"
-          value={stats.total}
-          icon={Package}
-          trend={12}
-          color="from-blue-600 to-cyan-600"
-          subtitle="+23 from last month"
-        />
-        <StatCard
-          title="In Transit"
-          value={stats.inTransit}
-          icon={Truck}
-          trend={8}
-          color="from-yellow-600 to-orange-600"
-          subtitle="Live tracking active"
-        />
-        <StatCard
-          title="Completed"
-          value={stats.delivered}
-          icon={CheckCircle}
-          trend={15}
-          color="from-green-600 to-emerald-600"
-          subtitle="Today: 8 deliveries"
-        />
-        <StatCard
-          title="On-Time Rate"
-          value={`${stats.onTimeRate}%`}
-          icon={Award}
-          trend={5}
-          color="from-purple-600 to-pink-600"
-          subtitle="Avg: 2.5 hrs per delivery"
-        />
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                <CheckCircle className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Completed</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.completed}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <div className="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center">
+                <Clock className="h-5 w-5 text-yellow-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Pending</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.pending}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2">
+              <div className="h-10 w-10 rounded-full bg-purple-100 flex items-center justify-center">
+                <DollarSign className="h-5 w-5 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Earnings</p>
+                <p className="text-2xl font-bold text-gray-800">₹{stats.earnings}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Live Map Preview - Mock */}
-      <Card className="relative overflow-hidden bg-gradient-to-r from-blue-900 to-purple-900 text-white">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Map className="h-5 w-5" />
-              <h3 className="font-semibold">Live Delivery Tracking</h3>
-            </div>
-            <Badge variant="outline" className="bg-white/20 text-white border-white/30">
-              <span className="h-2 w-2 bg-green-400 rounded-full mr-2 animate-ping"></span>
-              3 Active Vehicles
-            </Badge>
-          </div>
-          <div className="relative h-48 bg-blue-800/30 rounded-lg overflow-hidden">
-            {/* Mock Map Grid */}
-            <div className="absolute inset-0" style={{
-              backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.1) 1px, transparent 0)',
-              backgroundSize: '40px 40px'
-            }} />
-            {/* Moving Dots Animation */}
-            <div className="absolute top-1/4 left-1/4 animate-bounce">
-              <div className="h-3 w-3 bg-green-500 rounded-full shadow-lg shadow-green-500/50" />
-            </div>
-            <div className="absolute top-1/2 left-1/2 animate-pulse">
-              <div className="h-3 w-3 bg-blue-500 rounded-full shadow-lg shadow-blue-500/50" />
-            </div>
-            <div className="absolute bottom-1/3 right-1/4 animate-bounce delay-1000">
-              <div className="h-3 w-3 bg-yellow-500 rounded-full shadow-lg shadow-yellow-500/50" />
-            </div>
-            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/50 to-transparent">
-              <p className="text-sm">3 deliveries in progress • ETA: 15-30 mins</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Search and Filter Bar */}
-      <Card className="sticky top-0 z-10 backdrop-blur-lg bg-background/80">
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by ID, woman name, address..."
-                className="pl-10"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[150px]">
-                  <Filter className="h-4 w-4 mr-2" />
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="assigned">Assigned</SelectItem>
-                  <SelectItem value="in-transit">In Transit</SelectItem>
-                  <SelectItem value="delivered">Delivered</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button variant="outline" size="icon" onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}>
-                <Layers className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Delivery Cards Grid/List */}
-      <div className={viewMode === 'grid' 
-        ? "grid gap-4 md:grid-cols-2 lg:grid-cols-3" 
-        : "space-y-4"
-      }>
-        {filteredDeliveries.map((delivery, index) => (
-          <Card 
-            key={delivery.id} 
-            className="group hover:shadow-xl transition-all duration-300 animate-slide-in"
-            style={{ animationDelay: `${index * 50}ms` }}
-          >
-            <CardContent className="p-0">
-              {/* Priority Indicator */}
-              <div className={`h-1 w-full rounded-t-lg ${
-                delivery.priority === 'high' ? 'bg-red-500' :
-                delivery.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
-              }`} />
-              
-              <div className="p-5">
-                {/* Header */}
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(delivery.status)}
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold">{delivery.id}</p>
-                        {delivery.priority === 'high' && (
-                          <Badge variant="destructive" className="animate-pulse">URGENT</Badge>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">Order: {delivery.order_id}</p>
-                    </div>
+      {/* Main Content */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Left Column - Partner Profile */}
+        <div className="space-y-4">
+          <DeliveryPartnerCard />
+          
+          {/* Rating Card */}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Your Rating</p>
+                  <div className="flex items-center gap-1 mt-1">
+                    <span className="text-3xl font-bold text-gray-800">{stats.rating}</span>
+                    <Star className="h-5 w-5 fill-yellow-400 text-yellow-400" />
                   </div>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Share2 className="h-4 w-4" />
-                  </Button>
                 </div>
-
-                {/* Woman Info */}
-                <div className="mb-3">
-                  <h3 className="font-semibold text-lg">{delivery.woman_name}</h3>
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
-                    <MapPin className="h-3 w-3 shrink-0" />
-                    <span className="truncate">{delivery.address}</span>
-                  </div>
-                  {delivery.contact && (
-                    <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
-                      <Phone className="h-3 w-3 shrink-0" />
-                      <span>{delivery.contact}</span>
-                    </div>
-                  )}
+                <div className="h-12 w-12 rounded-full bg-yellow-100 flex items-center justify-center">
+                  <Award className="h-6 w-6 text-yellow-600" />
                 </div>
-
-                {/* Items with Icons */}
-                {delivery.items && (
-                  <div className="mb-3">
-                    <p className="text-xs text-muted-foreground mb-1">Items:</p>
-                    <div className="flex flex-wrap gap-1">
-                      {(Array.isArray(delivery.items) ? delivery.items : [delivery.items]).map((item, idx) => (
-                        <Badge key={idx} variant="secondary" className="text-xs group-hover:bg-primary/10 transition-colors">
-                          <Package className="h-3 w-3 mr-1" />
-                          {typeof item === 'string' ? item : 'Item'}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Delivery Info Grid */}
-                <div className="grid grid-cols-2 gap-2 mb-3 text-sm bg-muted/30 p-2 rounded-lg">
-                  <div className="flex items-center gap-1">
-                    <Calendar className="h-3 w-3 text-muted-foreground" />
-                    <span>{delivery.scheduled_date || 'Not scheduled'}</span>
-                  </div>
-                  {delivery.delivery_partner && (
-                    <div className="flex items-center gap-1">
-                      <User className="h-3 w-3 text-muted-foreground" />
-                      <span className="truncate">{delivery.delivery_partner}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Status and Actions */}
-                <div className="flex items-center gap-2 mb-3">
-                  <Badge className={getStatusColor(delivery.status)}>
-                    {delivery.status}
-                  </Badge>
-                  <div className="flex-1" />
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Print">
-                    <Printer className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Email">
-                    <Mail className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                {/* Progress Bar for Active Deliveries */}
-                {delivery.status === 'in-transit' && (
-                  <div className="space-y-1 animate-pulse">
-                    <div className="flex justify-between text-xs">
-                      <span>Delivery Progress</span>
-                      <span className="font-medium text-primary">75%</span>
-                    </div>
-                    <Progress value={75} className="h-2" />
-                    <p className="text-xs text-muted-foreground mt-1">
-                      <Navigation className="h-3 w-3 inline mr-1" />
-                      ETA: 15 minutes
-                    </p>
-                  </div>
-                )}
               </div>
             </CardContent>
           </Card>
-        ))}
+        </div>
+
+        {/* Right Column - Current Task & Upcoming */}
+        <div className="md:col-span-2 space-y-4">
+          {/* Current Task */}
+          {currentTask ? (
+            <CurrentTaskCard 
+              task={currentTask}
+              onNavigate={handleNavigate}
+              onCall={handleCall}
+            />
+          ) : (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <Truck className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-gray-500">No active deliveries</p>
+                <p className="text-sm text-gray-400 mt-1">Take a break or check assigned deliveries</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Upcoming Deliveries */}
+          <Card>
+            <CardContent className="p-4">
+              <h3 className="font-semibold text-gray-800 mb-3">Upcoming Deliveries</h3>
+              {upcomingDeliveries.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-4">No upcoming deliveries</p>
+              ) : (
+                <div className="space-y-2">
+                  {upcomingDeliveries.map((delivery, index) => (
+                    <motion.div
+                      key={delivery.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                      onClick={() => navigate('/delivery/assigned')}
+                    >
+                      <div>
+                        <p className="font-medium text-gray-800">{delivery.woman_name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{delivery.address}</p>
+                      </div>
+                      <Badge variant="outline" className="border-gray-300 text-gray-600">
+                        {delivery.time}
+                      </Badge>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      {/* Empty State */}
-      {filteredDeliveries.length === 0 && (
-        <Card>
-          <CardContent className="p-12 text-center">
-            <div className="animate-bounce mb-4">
-              <Package className="h-16 w-16 text-muted-foreground mx-auto" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">No deliveries found</h3>
-            <p className="text-muted-foreground mb-6">
-              {searchTerm || statusFilter !== 'all' 
-                ? "Try adjusting your search or filters" 
-                : "Ready to start delivering? Create your first delivery request."}
-            </p>
-            <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600">
-              <Plus className="h-4 w-4 mr-2" />
-              Create New Delivery
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Floating Action Button for Mobile */}
-      <div className="fixed bottom-6 right-6 md:hidden">
-        <Button size="lg" className="h-14 w-14 rounded-full shadow-lg bg-gradient-to-r from-blue-600 to-purple-600">
-          <Plus className="h-6 w-6" />
+      {/* Quick Actions */}
+      <div className="grid grid-cols-3 gap-3">
+        <Button 
+          className="h-16 flex flex-col items-center justify-center bg-blue-600 hover:bg-blue-700 text-white"
+          onClick={() => navigate('/delivery/assigned')}
+        >
+          <Package className="h-5 w-5 mb-1" />
+          <span className="text-xs">Assigned</span>
+        </Button>
+        <Button 
+          className="h-16 flex flex-col items-center justify-center bg-green-600 hover:bg-green-700 text-white"
+          onClick={() => navigate('/delivery/completed')}
+        >
+          <CheckCircle className="h-5 w-5 mb-1" />
+          <span className="text-xs">Completed</span>
+        </Button>
+        <Button 
+          className="h-16 flex flex-col items-center justify-center bg-purple-600 hover:bg-purple-700 text-white"
+          onClick={() => navigate('/delivery/map')}
+        >
+          <Navigation className="h-5 w-5 mb-1" />
+          <span className="text-xs">Live Map</span>
         </Button>
       </div>
     </div>

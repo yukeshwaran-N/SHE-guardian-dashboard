@@ -8,15 +8,17 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import AppUsers from './pages/admin/AppUsers';
 import DebugUsers from "./pages/DebugUsers";
+import { useEffect } from 'react';
 
-
+// IMPORT NOTIFICATION SERVICE - Add this line!
+import { notificationService } from './services/notificationService';
 
 // Pages
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
-import Notifications from "./pages/Notifications";
 import HelpSupport from "./pages/HelpSupport";
+import NotificationsPage from './pages/Notifications';
 
 // Admin Pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -28,18 +30,27 @@ import ASHAWorkers from "./pages/admin/ASHAWorkers";
 import Reports from "./pages/admin/Reports";
 import Settings from "./pages/admin/Settings";
 
-
-
 // Delivery Pages
 import DeliveryDashboard from "./pages/delivery/DeliveryDashboard";
 import AssignedDeliveries from "./pages/delivery/AssignedDeliveries";
 import Inventory from "./pages/delivery/Inventory";
 import CompletedDeliveries from "./pages/delivery/CompletedDeliveries";
 import Profile from "./pages/delivery/Profile";
+import DeliveryMapView from './pages/delivery/DeliveryMapView';
 
 const queryClient = new QueryClient();
 
 function App() {
+  useEffect(() => {
+    console.log('🚀 Initializing notification service...');
+    notificationService.init();
+    
+    // Request browser notification permission
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
@@ -52,7 +63,7 @@ function App() {
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
 
-              {/* 🔥 IMPORTANT: All protected routes should be INSIDE DashboardLayout */}
+              {/* Protected routes inside DashboardLayout */}
               <Route element={<DashboardLayout />}>
                 {/* Admin Routes */}
                 <Route path="/admin" element={<AdminDashboard />} />
@@ -72,9 +83,10 @@ function App() {
                 <Route path="/delivery/inventory" element={<Inventory />} />
                 <Route path="/delivery/completed" element={<CompletedDeliveries />} />
                 <Route path="/delivery/profile" element={<Profile />} />
+                <Route path="/delivery/map" element={<DeliveryMapView />} />
 
-                {/* 🔥 Common Pages - Now they will show with sidebar */}
-                <Route path="/notifications" element={<Notifications />} />
+                {/* Common Pages */}
+                <Route path="/notifications" element={<NotificationsPage />} />
                 <Route path="/help" element={<HelpSupport />} />
               </Route>
 
