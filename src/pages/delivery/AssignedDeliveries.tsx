@@ -59,36 +59,17 @@ export default function AssignedDeliveries() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // Fetch assigned deliveries from Supabase
   useEffect(() => {
     fetchAssignedDeliveries();
-
-    // Real-time subscription for updates
-    const subscription = supabase
-      .channel('assigned-deliveries-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'deliveries',
-        filter: `delivery_partner=eq.${user?.id}`
-      }, () => {
-        fetchAssignedDeliveries(true);
-      })
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, [user]);
 
   useEffect(() => {
     filterDeliveries();
   }, [searchTerm, statusFilter, deliveries]);
 
-  const fetchAssignedDeliveries = async (silent = false) => {
-    if (!silent) setLoading(true);
+  const fetchAssignedDeliveries = async () => {
+    setLoading(true);
     try {
-      // Get deliveries assigned to this partner that are not delivered/cancelled
       const { data, error } = await supabase
         .from('deliveries')
         .select('*')
@@ -98,34 +79,32 @@ export default function AssignedDeliveries() {
 
       if (error) throw error;
 
-      // Add mock coordinates for demo (replace with actual geocoding)
-      const deliveriesWithCoords = (data || []).map((delivery, index) => ({
+      // Add mock data for display
+      const deliveriesWithMeta = (data || []).map((delivery, index) => ({
         ...delivery,
-        lat: 28.5900 + (index * 0.01),
-        lng: 77.2500 + (index * 0.01),
         priority: getRandomPriority(),
-        progress: delivery.status === 'in-transit' ? Math.floor(Math.random() * 60) + 20 : undefined
+        progress: delivery.status === 'in-transit' ? Math.floor(Math.random() * 60) + 20 : undefined,
+        lat: 28.5900 + (index * 0.01),
+        lng: 77.2500 + (index * 0.01)
       }));
 
-      console.log('Fetched deliveries:', deliveriesWithCoords);
-      setDeliveries(deliveriesWithCoords);
-      setFilteredDeliveries(deliveriesWithCoords);
+      setDeliveries(deliveriesWithMeta);
+      setFilteredDeliveries(deliveriesWithMeta);
     } catch (error) {
       console.error('Error fetching deliveries:', error);
       toast({
         title: "Error",
-        description: "Failed to load assigned deliveries",
+        description: "Failed to load deliveries",
         variant: "destructive",
       });
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   };
 
   const filterDeliveries = () => {
     let filtered = [...deliveries];
 
-    // Search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(d => 
@@ -135,7 +114,6 @@ export default function AssignedDeliveries() {
       );
     }
 
-    // Status filter
     if (statusFilter !== "all") {
       filtered = filtered.filter(d => d.status === statusFilter);
     }
@@ -146,11 +124,12 @@ export default function AssignedDeliveries() {
   const handleStatusUpdate = async (deliveryId: string, newStatus: string) => {
     setUpdatingId(deliveryId);
     try {
+      // Remove updated_at since it doesn't exist in your table
       const { error } = await supabase
         .from('deliveries')
         .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString()
+          status: newStatus
+          // Removed updated_at
         })
         .eq('id', deliveryId);
 
@@ -162,14 +141,14 @@ export default function AssignedDeliveries() {
       ));
 
       toast({
-        title: "Status Updated",
+        title: "Success",
         description: `Delivery marked as ${newStatus}`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating status:', error);
       toast({
         title: "Error",
-        description: "Failed to update status",
+        description: error.message || "Failed to update status",
         variant: "destructive",
       });
     } finally {
@@ -195,19 +174,6 @@ export default function AssignedDeliveries() {
     });
   };
 
-  const handleContact = (contact: string | null) => {
-    if (contact) {
-      window.location.href = `tel:${contact}`;
-    } else {
-      toast({
-        title: "No Contact",
-        description: "Contact information not available",
-        variant: "destructive",
-      });
-    }
-  };
-
-  // Helper functions
   const getRandomPriority = (): 'high' | 'medium' | 'low' => {
     const priorities: ('high' | 'medium' | 'low')[] = ['high', 'medium', 'low'];
     return priorities[Math.floor(Math.random() * priorities.length)];
@@ -228,7 +194,6 @@ export default function AssignedDeliveries() {
 
   const calculateDistance = (lat?: number, lng?: number): string => {
     if (!lat || !lng) return 'Distance TBD';
-    // Mock distance calculation
     const distance = (Math.random() * 4 + 1).toFixed(1);
     return `${distance} km`;
   };
@@ -265,7 +230,6 @@ export default function AssignedDeliveries() {
     }
   };
 
-  // Calculate stats
   const stats = {
     total: deliveries.length,
     pending: deliveries.filter(d => d.status === 'pending' || d.status === 'assigned').length,
@@ -293,7 +257,7 @@ export default function AssignedDeliveries() {
             You have {filteredDeliveries.length} deliveries scheduled
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => fetchAssignedDeliveries()}>
+        <Button variant="outline" size="sm" onClick={fetchAssignedDeliveries}>
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
@@ -436,12 +400,6 @@ export default function AssignedDeliveries() {
                             <Navigation className="h-4 w-4 text-gray-400" />
                             {calculateDistance(delivery.lat, delivery.lng)}
                           </span>
-                          {delivery.contact && (
-                            <span className="flex items-center gap-1 text-gray-600">
-                              <Phone className="h-4 w-4 text-gray-400" />
-                              {delivery.contact}
-                            </span>
-                          )}
                         </div>
 
                         {/* Items */}
@@ -471,7 +429,6 @@ export default function AssignedDeliveries() {
 
                     {/* Right Section - Actions */}
                     <div className="flex lg:flex-col gap-2 lg:min-w-[200px]">
-                      {/* Status Update Buttons */}
                       {delivery.status === 'assigned' && (
                         <Button
                           size="sm"
@@ -504,7 +461,6 @@ export default function AssignedDeliveries() {
                         </Button>
                       )}
 
-                      {/* Navigation Button */}
                       <Button 
                         size="sm"
                         variant="outline"
@@ -514,19 +470,6 @@ export default function AssignedDeliveries() {
                         <Navigation className="h-4 w-4 mr-2" />
                         Navigate
                       </Button>
-
-                      {/* Contact Button */}
-                      {delivery.contact && (
-                        <Button 
-                          size="sm"
-                          variant="outline"
-                          className="w-full"
-                          onClick={() => handleContact(delivery.contact)}
-                        >
-                          <Phone className="h-4 w-4 mr-2" />
-                          Contact
-                        </Button>
-                      )}
                     </div>
                   </div>
                 </CardContent>

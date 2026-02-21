@@ -24,7 +24,8 @@ import {
   Bell,
   HelpCircle,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  IndianRupee  // ✅ Added missing import
 } from "lucide-react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
@@ -58,7 +59,11 @@ export function AppSidebar() {
     { icon: BarChart3, label: "Reports", path: "/admin/reports" },
     { icon: Settings, label: "Settings", path: "/admin/settings" },
     { icon: Users, label: "App Users", path: "/admin/app-users" },
-  ];
+// In deliveryMenuItems, add:
+// In deliveryMenuItems, update the label
+
+
+];
 
   // Delivery-specific menu items
   const deliveryMenuItems = [
@@ -66,6 +71,10 @@ export function AppSidebar() {
     { icon: Package, label: "Inventory", path: "/delivery/inventory" },
     { icon: Truck, label: "Completed", path: "/delivery/completed" },
     { icon: User, label: "Profile", path: "/delivery/profile" },
+    // In deliveryMenuItems array
+{ icon: IndianRupee, label: "My Payments", path: "/delivery/payments" },
+{ icon: Package, label: "My Orders", path: "/delivery/orders" },
+
   ];
 
   // Choose menu based on role
@@ -86,7 +95,7 @@ export function AppSidebar() {
           {!collapsed && (
             <div>
               <h2 className="text-lg font-semibold leading-none bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
-                SAKHI
+                SHE
               </h2>
               <p className="text-xs text-muted-foreground capitalize mt-1">
                 {user?.role} Portal

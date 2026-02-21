@@ -49,8 +49,8 @@ export default function Login() {
       <div className="w-full max-w-md animate-fade-in">
         {/* Logo */}
         <div className="mb-8 text-center">
-          <img src={sakhiLogo} alt="SAKHI" className="mx-auto h-20 w-20" />
-          <h1 className="mt-4 text-2xl font-bold text-foreground">SAKHI</h1>
+          <img src={sakhiLogo} alt="SHE" className="mx-auto h-20 w-20" />
+          <h1 className="mt-4 text-2xl font-bold text-foreground">SHE</h1>
           <p className="text-sm text-muted-foreground">Women's Health Support Platform</p>
         </div>
 
@@ -116,7 +116,7 @@ export default function Login() {
         </div>
 
         <p className="mt-6 text-center text-xs text-muted-foreground">
-          © 2026 SAKHI — Government of India Initiative
+          © 2026 SHE — Government of India Initiative
         </p>
       </div>
     </div>

@@ -47,7 +47,7 @@ export default function Login() {
         {/* Logo */}
         <div className="mb-8 text-center">
           <img src={sakhiLogo} alt="SAKHI" className="mx-auto h-20 w-20" />
-          <h1 className="mt-4 text-2xl font-bold text-foreground">SAKHI</h1>
+          <h1 className="mt-4 text-2xl font-bold text-foreground">SHE</h1>
           <p className="text-sm text-muted-foreground">Women's Health Support Platform</p>
         </div>
 

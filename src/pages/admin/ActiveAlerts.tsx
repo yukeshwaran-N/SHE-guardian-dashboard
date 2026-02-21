@@ -1,5 +1,6 @@
 // src/pages/admin/ActiveAlerts.tsx
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/services/supabase";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,9 @@ import {
   ArrowDownRight,
   Download,
   Sparkles,
-  Zap
+  Zap,
+  Navigation, // Added for map button
+  Map
 } from "lucide-react";
 
 interface Alert {
@@ -66,9 +69,12 @@ interface Alert {
   timestamp: string | null;
   location: string | null;
   status: string | null;
+  lat?: number; // Added for map coordinates
+  lng?: number; // Added for map coordinates
 }
 
 export default function ActiveAlerts() {
+  const navigate = useNavigate();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [filteredAlerts, setFilteredAlerts] = useState<Alert[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -168,8 +174,15 @@ export default function ActiveAlerts() {
 
       if (error) throw error;
       
-      setAlerts(data || []);
-      setFilteredAlerts(data || []);
+      // Add random coordinates for demo (replace with actual geocoding)
+      const alertsWithCoords = (data || []).map((alert, index) => ({
+        ...alert,
+        lat: 28.5900 + (index * 0.01),
+        lng: 77.2500 + (index * 0.01)
+      }));
+      
+      setAlerts(alertsWithCoords);
+      setFilteredAlerts(alertsWithCoords);
     } catch (error) {
       console.error('Error:', error);
       toast({
@@ -240,6 +253,32 @@ export default function ActiveAlerts() {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  // New function to handle map navigation
+  const handleViewOnMap = (alert: Alert) => {
+    if (!alert.location) {
+      toast({
+        title: "Location Not Available",
+        description: "No location data for this alert",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Navigate to map page with alert location
+    navigate('/delivery/map', {
+      state: {
+        lat: alert.lat || 28.6139,
+        lng: alert.lng || 77.2090,
+        address: alert.location,
+        womanName: alert.woman_name,
+        id: `alert-${alert.id}`,
+        type: 'alert',
+        title: `Alert: ${alert.type}`,
+        priority: alert.severity
+      }
+    });
   };
 
   const exportToCSV = () => {
@@ -566,6 +605,18 @@ export default function ActiveAlerts() {
                         <Eye className="h-4 w-4 mr-2" />
                         View
                       </Button>
+                      
+                      {/* Map Button - New */}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="px-2"
+                        onClick={() => handleViewOnMap(alert)}
+                        title="View on map"
+                      >
+                        <Map className="h-4 w-4" />
+                      </Button>
+                      
                       {alert.status === 'active' && (
                         <Button
                           size="sm"
@@ -644,6 +695,21 @@ export default function ActiveAlerts() {
                 <Label className="text-muted-foreground">Location</Label>
                 <p className="font-medium">{selectedAlert.location || 'N/A'}</p>
               </div>
+
+              {/* Map Button in Dialog */}
+              {selectedAlert.location && (
+                <Button
+                  className="w-full mt-2"
+                  variant="outline"
+                  onClick={() => {
+                    setIsViewDialogOpen(false);
+                    handleViewOnMap(selectedAlert);
+                  }}
+                >
+                  <Map className="h-4 w-4 mr-2" />
+                  View Location on Map
+                </Button>
+              )}
             </div>
           )}
           <DialogFooter>

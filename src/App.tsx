@@ -37,6 +37,9 @@ import Inventory from "./pages/delivery/Inventory";
 import CompletedDeliveries from "./pages/delivery/CompletedDeliveries";
 import Profile from "./pages/delivery/Profile";
 import DeliveryMapView from './pages/delivery/DeliveryMapView';
+import PaymentsDashboard from './pages/delivery/MyPayments';
+import Orders from './pages/delivery/Orders';
+
 
 const queryClient = new QueryClient();
 
@@ -84,6 +87,10 @@ function App() {
                 <Route path="/delivery/completed" element={<CompletedDeliveries />} />
                 <Route path="/delivery/profile" element={<Profile />} />
                 <Route path="/delivery/map" element={<DeliveryMapView />} />
+                <Route path="/delivery/payments" element={<PaymentsDashboard />} />
+                <Route path="/delivery/orders" element={<Orders />} />
+
+
 
                 {/* Common Pages */}
                 <Route path="/notifications" element={<NotificationsPage />} />
