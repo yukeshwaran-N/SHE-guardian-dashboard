@@ -10,6 +10,7 @@ import AppUsers from './pages/admin/AppUsers';
 import DebugUsers from "./pages/DebugUsers";
 import { useEffect } from 'react';
 
+
 // IMPORT NOTIFICATION SERVICE - Add this line!
 import { notificationService } from './services/notificationService';
 
@@ -19,6 +20,8 @@ import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import HelpSupport from "./pages/HelpSupport";
 import NotificationsPage from './pages/Notifications';
+import ASHADashboard from "./pages/asha/ASHA Dashboard";
+
 
 // Admin Pages
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -29,6 +32,10 @@ import HealthRequests from "./pages/admin/HealthRequests";
 import ASHAWorkers from "./pages/admin/ASHAWorkers";
 import Reports from "./pages/admin/Reports";
 import Settings from "./pages/admin/Settings";
+import Doctors from "./pages/admin/Doctors";
+import Consultations from "./pages/admin/Consultations";
+
+
 
 // Delivery Pages
 import DeliveryDashboard from "./pages/delivery/DeliveryDashboard";
@@ -37,8 +44,10 @@ import Inventory from "./pages/delivery/Inventory";
 import CompletedDeliveries from "./pages/delivery/CompletedDeliveries";
 import Profile from "./pages/delivery/Profile";
 import DeliveryMapView from './pages/delivery/DeliveryMapView';
-import PaymentsDashboard from './pages/delivery/MyPayments';
+import PaymentsDashboard from './pages/delivery/Payments';
 import Orders from './pages/delivery/Orders';
+import WomanSelector from "./pages/admin/WomanSelector";
+import WomanDashboard from "./pages/admin/WomanDashboard";
 
 
 const queryClient = new QueryClient();
@@ -66,8 +75,21 @@ function App() {
               <Route path="/" element={<Index />} />
               <Route path="/login" element={<Login />} />
 
+
+              
+
+
+
+
               {/* Protected routes inside DashboardLayout */}
               <Route element={<DashboardLayout />}>
+
+{/* ASHA Dashboard Route */}
+  <Route path="/asha" element={<ASHADashboard />} />
+  <Route path="/asha/women" element={<ASHADashboard />} /> 
+
+
+
                 {/* Admin Routes */}
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/alerts" element={<ActiveAlerts />} />
@@ -79,6 +101,14 @@ function App() {
                 <Route path="/admin/settings" element={<Settings />} />
                 <Route path="/admin/app-users" element={<AppUsers />} />
                 <Route path="/debug-users" element={<DebugUsers />} />
+                <Route path="/admin/doctors" element={<Doctors />} />
+                <Route path="/admin/consultations" element={<Consultations />} />
+
+                // "Woman dashboard-specific routes"
+                <Route path="/admin/women" element={<WomanSelector />} />
+                <Route path="/admin/woman/:id" element={<WomanDashboard />} />
+
+
 
                 {/* Delivery Routes */}
                 <Route path="/delivery" element={<DeliveryDashboard />} />

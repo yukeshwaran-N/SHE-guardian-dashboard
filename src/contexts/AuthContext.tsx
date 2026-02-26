@@ -1,69 +1,77 @@
 // src/contexts/AuthContext.tsx
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import { supabase } from "@/lib/supabase";
-
-// Update User type to match your table
-interface User {
-  id: string;        // This stores the ID (admin01, delivery01)
-  role: 'admin' | 'delivery';
-}
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+import { usersService, User } from "@/services/usersService";
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (id: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem("sakhi_user");
-    return stored ? JSON.parse(stored) : null;
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
-  const login = useCallback(async (id: string, password: string) => {
+  // Check for existing session
+  useEffect(() => {
+    const storedUser = localStorage.getItem("sakhi_user");
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    }
+    setLoading(false);
+  }, []);
+
+  const login = useCallback(async (email: string, password: string) => {
     try {
-      console.log("Attempting login with ID:", id); // For debugging
+      console.log("Login attempt:", email);
       
-      // Query Supabase directly
-      const { data, error } = await supabase
-        .from('user')
-        .select('id, role')
-        .eq('id', id)
-        .eq('password', password)
-        .single();
-
-      if (error || !data) {
-        console.log("Login error or no data:", error);
-        return { success: false, error: "Invalid ID or Password" };
-      }
-
-      // Login successful
-      const userData = {
-        id: data.id,
-        role: data.role as 'admin' | 'delivery'
-      };
+      const userData = await usersService.login(email, password);
+      
+      // Update last login (don't wait for it)
+      usersService.updateLastLogin(userData.id).catch(console.error);
 
       setUser(userData);
       localStorage.setItem("sakhi_user", JSON.stringify(userData));
 
+      // Redirect based on role
+      if (userData.role === 'admin') {
+        navigate('/admin', { replace: true });
+      } else if (userData.role === 'delivery') {
+        navigate('/delivery', { replace: true });
+      } else if (userData.role === 'asha') {
+        navigate('/asha', { replace: true });
+      } else if (userData.role === 'woman') {
+        navigate('/woman', { replace: true });
+      }
+
       return { success: true };
 
-    } catch (err) {
-      console.error("Login error:", err);
-      return { success: false, error: "Connection error. Please try again." };
+    } catch (error) {
+      console.error("Login error:", error);
+      return { success: false, error: "Invalid email or password" };
     }
-  }, []);
+  }, [navigate]);
 
   const logout = useCallback(() => {
     setUser(null);
     localStorage.removeItem("sakhi_user");
-  }, []);
+    navigate('/login', { replace: true });
+  }, [navigate]);
 
   return (
-    <AuthContext.Provider value={{ user, isAuthenticated: !!user, login, logout }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isAuthenticated: !!user, 
+      loading,
+      login, 
+      logout 
+    }}>
       {children}
     </AuthContext.Provider>
   );

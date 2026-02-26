@@ -25,7 +25,12 @@ import {
   HelpCircle,
   ChevronLeft,
   ChevronRight,
-  IndianRupee  // ✅ Added missing import
+  IndianRupee,
+  Stethoscope,
+  Calendar,
+  LayoutDashboard,
+  Activity,
+  ShoppingCart
 } from "lucide-react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
@@ -46,42 +51,38 @@ export function AppSidebar() {
 
   // Common menu items for both roles
   const commonMenuItems = [
-    { icon: Home, label: "Dashboard", path: user.role === "admin" ? "/admin" : "/delivery" },
+    { icon: LayoutDashboard, label: "Dashboard", path: user.role === "admin" ? "/admin" : "/delivery" },
   ];
 
   // Admin-specific menu items
   const adminMenuItems = [
+    { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
+    { icon: Stethoscope, label: "Doctors", path: "/admin/doctors" },
+    { icon: Users, label: "Women Dashboard", path: "/admin/women" },
+    { icon: Calendar, label: "Consultations", path: "/admin/consultations" },
     { icon: AlertCircle, label: "Active Alerts", path: "/admin/alerts", badge: 3 },
-    { icon: Users, label: "Women Registry", path: "/admin/registry" },
     { icon: Truck, label: "Delivery Status", path: "/admin/deliveries", badge: 5 },
+    { icon: Package, label: "Inventory", path: "/admin/inventory" },
+    { icon: Activity, label: "ASHA Workers", path: "/admin/asha" },
     { icon: FileText, label: "Health Requests", path: "/admin/requests", badge: 2 },
-    { icon: Users, label: "ASHA Workers", path: "/admin/asha" },
+    { icon: Users, label: "App Users", path: "/admin/app-users" },
     { icon: BarChart3, label: "Reports", path: "/admin/reports" },
     { icon: Settings, label: "Settings", path: "/admin/settings" },
-    { icon: Users, label: "App Users", path: "/admin/app-users" },
-// In deliveryMenuItems, add:
-// In deliveryMenuItems, update the label
-
-
-];
+  ];
 
   // Delivery-specific menu items
   const deliveryMenuItems = [
+    { icon: LayoutDashboard, label: "Dashboard", path: "/delivery" },
     { icon: ClipboardList, label: "Assigned Deliveries", path: "/delivery/assigned", badge: 4 },
     { icon: Package, label: "Inventory", path: "/delivery/inventory" },
+    { icon: ShoppingCart, label: "My Orders", path: "/delivery/orders" },
+    { icon: IndianRupee, label: "My Payments", path: "/delivery/payments" },
     { icon: Truck, label: "Completed", path: "/delivery/completed" },
     { icon: User, label: "Profile", path: "/delivery/profile" },
-    // In deliveryMenuItems array
-{ icon: IndianRupee, label: "My Payments", path: "/delivery/payments" },
-{ icon: Package, label: "My Orders", path: "/delivery/orders" },
-
   ];
 
   // Choose menu based on role
-  const menuItems = [
-    ...commonMenuItems,
-    ...(user?.role === "admin" ? adminMenuItems : deliveryMenuItems)
-  ];
+  const menuItems = user?.role === "admin" ? adminMenuItems : deliveryMenuItems;
 
   const isActive = (path: string) => location.pathname === path;
 

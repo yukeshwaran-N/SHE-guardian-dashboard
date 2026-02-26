@@ -1,20 +1,13 @@
 // src/pages/admin/ActiveAlerts.tsx
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "@/services/supabase";
-import { Card, CardContent } from "@/components/ui/card";
+import { alertsService, Alert } from "@/services/alertsService";
+import { womenService } from "@/services/womenService";
+import { usersService } from "@/services/usersService";
+import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -22,169 +15,107 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { motion, AnimatePresence } from "framer-motion";
+import { Card, CardContent } from "@/components/ui/card";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { 
+  Plus, 
+  Search, 
+  Edit2, 
+  Trash2, 
+  Loader2,
   AlertTriangle,
-  Search,
-  Filter,
-  Bell,
-  BellRing,
-  BellOff,
-  Clock,
   MapPin,
+  Phone,
+  Calendar,
   User,
-  Tag,
   CheckCircle,
   XCircle,
-  Loader2,
-  RefreshCw,
-  Eye,
-  Trash2,
-  AlertCircle,
-  AlertOctagon,
-  Info,
-  Flame,
-  Droplet,
-  Heart,
-  Activity,
-  Shield,
-  Star,
-  TrendingUp,
-  Calendar,
-  ArrowUpRight,
-  ArrowDownRight,
-  Download,
-  Sparkles,
-  Zap,
-  Navigation, // Added for map button
-  Map
+  Clock,
+  Filter
 } from "lucide-react";
 
-interface Alert {
-  id: number;
-  woman_name: string | null;
-  type: string | null;
-  severity: string | null;
-  timestamp: string | null;
-  location: string | null;
-  status: string | null;
-  lat?: number; // Added for map coordinates
-  lng?: number; // Added for map coordinates
+interface Woman {
+  id: string;
+  full_name: string;
+}
+
+interface ASHAWorker {
+  id: string;
+  full_name: string;
 }
 
 export default function ActiveAlerts() {
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [filteredAlerts, setFilteredAlerts] = useState<Alert[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [women, setWomen] = useState<Woman[]>([]);
+  const [ashaWorkers, setAshaWorkers] = useState<ASHAWorker[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isResolveDialogOpen, setIsResolveDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [actionLoading, setActionLoading] = useState(false);
-  const [stats, setStats] = useState({
-    total: 0,
-    high: 0,
-    medium: 0,
-    low: 0,
-    resolved: 0
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [alertToDelete, setAlertToDelete] = useState<string | null>(null);
+  const [formData, setFormData] = useState<any>({
+    woman_id: "",
+    type: "",
+    severity: "medium",
+    description: "",
+    location: "",
+    assigned_to: ""
   });
-
+  const [saving, setSaving] = useState(false);
+  const [stats, setStats] = useState({ active: 0, resolved: 0, highPriority: 0 });
   const { toast } = useToast();
 
-  // Fetch alerts on mount
   useEffect(() => {
     fetchAlerts();
-
-    // Real-time subscription
-    const subscription = supabase
-      .channel('alerts-changes')
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'alerts' 
-      }, () => {
-        fetchAlerts(true);
-      })
-      .subscribe();
-
-    return () => {
-      subscription.unsubscribe();
-    };
+    fetchWomen();
+    fetchASHAWorkers();
+    fetchStats();
   }, []);
 
-  // Filter alerts when search/filters change
   useEffect(() => {
     filterAlerts();
-  }, [searchTerm, severityFilter, typeFilter, alerts]);
+  }, [alerts, searchTerm, statusFilter, severityFilter]);
 
-  // Calculate stats whenever alerts change
-  useEffect(() => {
-    calculateStats();
-  }, [alerts]);
-
-  const filterAlerts = () => {
-    let filtered = [...alerts];
-
-    // Apply search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(alert =>
-        alert.woman_name?.toLowerCase().includes(term) ||
-        alert.type?.toLowerCase().includes(term) ||
-        alert.location?.toLowerCase().includes(term) ||
-        alert.id.toString().includes(term)
-      );
-    }
-
-    // Apply severity filter
-    if (severityFilter !== "all") {
-      filtered = filtered.filter(alert => alert.severity === severityFilter);
-    }
-
-    // Apply type filter
-    if (typeFilter !== "all") {
-      filtered = filtered.filter(alert => alert.type === typeFilter);
-    }
-
-    setFilteredAlerts(filtered);
-  };
-
-  const calculateStats = () => {
-    setStats({
-      total: alerts.length,
-      high: alerts.filter(a => a.severity === 'high' && a.status === 'active').length,
-      medium: alerts.filter(a => a.severity === 'medium' && a.status === 'active').length,
-      low: alerts.filter(a => a.severity === 'low' && a.status === 'active').length,
-      resolved: alerts.filter(a => a.status === 'resolved').length
-    });
-  };
-
-  const fetchAlerts = async (silent = false) => {
-    if (!silent) setLoading(true);
+  const fetchAlerts = async () => {
     try {
-      const { data, error } = await supabase
-        .from('alerts')
-        .select('*')
-        .order('timestamp', { ascending: false });
-
-      if (error) throw error;
-      
-      // Add random coordinates for demo (replace with actual geocoding)
-      const alertsWithCoords = (data || []).map((alert, index) => ({
-        ...alert,
-        lat: 28.5900 + (index * 0.01),
-        lng: 77.2500 + (index * 0.01)
-      }));
-      
-      setAlerts(alertsWithCoords);
-      setFilteredAlerts(alertsWithCoords);
+      setLoading(true);
+      const data = await alertsService.getAllAlerts();
+      setAlerts(data);
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error fetching alerts:", error);
       toast({
         title: "Error",
         description: "Failed to load alerts",
@@ -195,609 +126,622 @@ export default function ActiveAlerts() {
     }
   };
 
-  const handleResolveAlert = async () => {
-    if (!selectedAlert) return;
-    setActionLoading(true);
-
+  const fetchWomen = async () => {
     try {
-      const { error } = await supabase
-        .from('alerts')
-        .update({ status: 'resolved' })
-        .eq('id', selectedAlert.id);
-
-      if (error) throw error;
-
-      await fetchAlerts(true);
-      setIsResolveDialogOpen(false);
-      
-      toast({
-        title: "Alert Resolved",
-        description: "The alert has been marked as resolved",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to resolve alert",
-        variant: "destructive",
-      });
-    } finally {
-      setActionLoading(false);
+      const data = await womenService.getAllWomen();
+      setWomen(data.map(w => ({ id: w.id, full_name: w.full_name || "" })));
+    } catch (error) {
+      console.error("Error fetching women:", error);
     }
   };
 
-  const handleDeleteAlert = async () => {
-    if (!selectedAlert) return;
-    setActionLoading(true);
-
+  const fetchASHAWorkers = async () => {
     try {
-      const { error } = await supabase
-        .from('alerts')
-        .delete()
-        .eq('id', selectedAlert.id);
-
-      if (error) throw error;
-
-      await fetchAlerts(true);
-      setIsDeleteDialogOpen(false);
+      const { data } = await supabase
+        .from('users')
+        .select('id, full_name')
+        .eq('role', 'asha')
+        .eq('is_active', true);
       
-      toast({
-        title: "Alert Deleted",
-        description: "The alert has been permanently deleted",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to delete alert",
-        variant: "destructive",
-      });
-    } finally {
-      setActionLoading(false);
+      setAshaWorkers(data || []);
+    } catch (error) {
+      console.error("Error fetching ASHA workers:", error);
     }
   };
 
-  // New function to handle map navigation
-  const handleViewOnMap = (alert: Alert) => {
-    if (!alert.location) {
-      toast({
-        title: "Location Not Available",
-        description: "No location data for this alert",
-        variant: "destructive",
-      });
-      return;
+  const fetchStats = async () => {
+    try {
+      const data = await alertsService.getAlertStats();
+      setStats(data);
+    } catch (error) {
+      console.error("Error fetching stats:", error);
+    }
+  };
+
+  const filterAlerts = () => {
+    let filtered = [...alerts];
+
+    // Apply search filter
+    if (searchTerm) {
+      filtered = filtered.filter(alert =>
+        alert.woman_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        alert.type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        alert.location?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        alert.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
     }
 
-    // Navigate to map page with alert location
-    navigate('/delivery/map', {
-      state: {
-        lat: alert.lat || 28.6139,
-        lng: alert.lng || 77.2090,
-        address: alert.location,
-        womanName: alert.woman_name,
-        id: `alert-${alert.id}`,
-        type: 'alert',
-        title: `Alert: ${alert.type}`,
-        priority: alert.severity
+    // Apply status filter
+    if (statusFilter !== "all") {
+      filtered = filtered.filter(alert => alert.status === statusFilter);
+    }
+
+    // Apply severity filter
+    if (severityFilter !== "all") {
+      filtered = filtered.filter(alert => alert.severity === severityFilter);
+    }
+
+    setFilteredAlerts(filtered);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSelectChange = (name: string, value: string) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+
+    try {
+      if (selectedAlert) {
+        // Update existing alert
+        await alertsService.updateAlert(selectedAlert.id, formData);
+        toast({
+          title: "Success",
+          description: "Alert updated successfully",
+        });
+      } else {
+        // Create new alert
+        await alertsService.createAlert(formData);
+        toast({
+          title: "Success",
+          description: "Alert created successfully",
+        });
       }
-    });
-  };
-
-  const exportToCSV = () => {
-    const headers = ['ID', 'Woman Name', 'Type', 'Severity', 'Location', 'Status', 'Timestamp'];
-    const rows = filteredAlerts.map(a => [
-      a.id,
-      a.woman_name || '',
-      a.type || '',
-      a.severity || '',
-      a.location || '',
-      a.status || '',
-      a.timestamp ? new Date(a.timestamp).toLocaleString() : ''
-    ]);
-
-    const csv = [headers, ...rows]
-      .map(row => row.map(cell => `"${cell}"`).join(','))
-      .join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `alerts_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    toast({
-      title: "Exported",
-      description: `${filteredAlerts.length} alerts exported`,
-    });
-  };
-
-  const getSeverityIcon = (severity: string | null) => {
-    switch(severity) {
-      case 'high': return <Flame className="h-5 w-5 text-red-500" />;
-      case 'medium': return <AlertCircle className="h-5 w-5 text-yellow-500" />;
-      case 'low': return <Info className="h-5 w-5 text-green-500" />;
-      default: return <Bell className="h-5 w-5 text-gray-500" />;
+      
+      setIsDialogOpen(false);
+      resetForm();
+      await fetchAlerts();
+      await fetchStats();
+    } catch (error) {
+      console.error("Error saving alert:", error);
+      toast({
+        title: "Error",
+        description: "Failed to save alert",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
     }
   };
 
-  const getSeverityColor = (severity: string | null) => {
-    switch(severity) {
-      case 'high': return 'bg-red-100 text-red-800 border-red-200';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-      case 'low': return 'bg-green-100 text-green-800 border-green-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+  const handleResolve = async (id: string) => {
+    try {
+      await alertsService.resolveAlert(id, user?.id || "");
+      await fetchAlerts();
+      await fetchStats();
+      toast({
+        title: "Success",
+        description: "Alert resolved successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to resolve alert",
+        variant: "destructive",
+      });
     }
   };
 
-  const getStatusColor = (status: string | null) => {
+  const handleDismiss = async (id: string) => {
+    try {
+      await alertsService.dismissAlert(id);
+      await fetchAlerts();
+      await fetchStats();
+      toast({
+        title: "Success",
+        description: "Alert dismissed",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to dismiss alert",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleAssign = async (id: string, assignedTo: string) => {
+    try {
+      await alertsService.assignAlert(id, assignedTo);
+      await fetchAlerts();
+      toast({
+        title: "Success",
+        description: "Alert assigned successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to assign alert",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleEdit = (alert: Alert) => {
+    setSelectedAlert(alert);
+    setFormData({
+      woman_id: alert.woman_id,
+      type: alert.type,
+      severity: alert.severity,
+      description: alert.description || "",
+      location: alert.location || "",
+      assigned_to: alert.assigned_to || ""
+    });
+    setIsDialogOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!alertToDelete) return;
+
+    try {
+      await alertsService.deleteAlert(alertToDelete);
+      await fetchAlerts();
+      await fetchStats();
+      toast({
+        title: "Success",
+        description: "Alert deleted successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete alert",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleteDialogOpen(false);
+      setAlertToDelete(null);
+    }
+  };
+
+  const resetForm = () => {
+    setSelectedAlert(null);
+    setFormData({
+      woman_id: "",
+      type: "",
+      severity: "medium",
+      description: "",
+      location: "",
+      assigned_to: ""
+    });
+  };
+
+  const getSeverityBadgeVariant = (severity: string) => {
+    switch(severity) {
+      case 'high': return 'destructive';
+      case 'medium': return 'warning';
+      case 'low': return 'secondary';
+      default: return 'default';
+    }
+  };
+
+  const getStatusBadgeVariant = (status: string) => {
     switch(status) {
-      case 'active': return 'bg-red-100 text-red-800 border-red-200';
-      case 'resolved': return 'bg-green-100 text-green-800 border-green-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
+      case 'active': return 'destructive';
+      case 'resolved': return 'default';
+      case 'dismissed': return 'secondary';
+      default: return 'default';
     }
   };
 
-  const formatTime = (timestamp: string | null) => {
-    if (!timestamp) return 'N/A';
-    const date = new Date(timestamp);
+  const getTimeAgo = (timestamp: string) => {
     const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
+    const past = new Date(timestamp);
+    const diffMs = now.getTime() - past.getTime();
     const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
-    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-    return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hours ago`;
+    return `${diffDays} days ago`;
   };
 
-  const StatCard = ({ title, value, icon: Icon, color, subtitle }: any) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ scale: 1.02 }}
-      transition={{ duration: 0.2 }}
-    >
-      <Card className="relative overflow-hidden group">
-        <div className={`absolute inset-0 bg-gradient-to-br ${color} opacity-0 group-hover:opacity-10 transition-opacity`} />
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-muted-foreground">{title}</p>
-              <p className="text-2xl font-bold mt-1">{value}</p>
-              {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
-            </div>
-            <div className={`h-10 w-10 rounded-full bg-${color.split(' ')[0]}-100 flex items-center justify-center group-hover:scale-110 transition-transform`}>
-              <Icon className={`h-5 w-5 text-${color.split(' ')[0]}-600`} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
+  const getInitials = (name: string) => {
+    if (!name) return "?";
+    return name.split(' ').map(n => n[0]).join('').toUpperCase();
+  };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground animate-pulse">Loading alerts...</p>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-between items-center"
-      >
+      <div className="flex justify-between items-center">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-red-600 to-orange-600 bg-clip-text text-transparent">
-              Active Alerts
-            </h1>
-            {stats.high > 0 && (
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: "spring", stiffness: 500, delay: 0.5 }}
-              >
-                <Badge variant="destructive" className="animate-pulse">
-                  <Flame className="h-3 w-3 mr-1" />
-                  {stats.high} High Priority
-                </Badge>
-              </motion.div>
-            )}
-          </div>
-          <p className="text-muted-foreground mt-1">
-            {filteredAlerts.length} alerts • {stats.resolved} resolved
+          <h1 className="text-3xl font-bold">Alerts Management</h1>
+          <p className="text-muted-foreground mt-2">
+            Monitor and manage emergency alerts
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => fetchAlerts()}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={exportToCSV}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
-        </div>
-      </motion.div>
+        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <DialogTrigger asChild>
+            <Button onClick={resetForm}>
+              <Plus className="h-4 w-4 mr-2" />
+              Create New Alert
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>
+                {selectedAlert ? "Edit Alert" : "Create New Alert"}
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="woman_id">Woman *</Label>
+                <Select
+                  value={formData.woman_id}
+                  onValueChange={(value) => handleSelectChange('woman_id', value)}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select woman" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {women.map((woman) => (
+                      <SelectItem key={woman.id} value={woman.id}>
+                        {woman.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard
-          title="Total Alerts"
-          value={stats.total}
-          icon={Bell}
-          color="from-blue-600 to-cyan-600"
-          subtitle="All time"
-        />
-        <StatCard
-          title="High Priority"
-          value={stats.high}
-          icon={Flame}
-          color="from-red-600 to-orange-600"
-          subtitle="Urgent attention"
-        />
-        <StatCard
-          title="Medium Priority"
-          value={stats.medium}
-          icon={AlertCircle}
-          color="from-yellow-600 to-amber-600"
-          subtitle="Needs review"
-        />
-        <StatCard
-          title="Resolved"
-          value={stats.resolved}
-          icon={CheckCircle}
-          color="from-green-600 to-emerald-600"
-          subtitle="Completed"
-        />
+              <div className="space-y-2">
+                <Label htmlFor="type">Alert Type *</Label>
+                <Input
+                  id="type"
+                  name="type"
+                  placeholder="e.g., Health Emergency, Accident, etc."
+                  value={formData.type}
+                  onChange={handleInputChange}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="severity">Severity *</Label>
+                <Select
+                  value={formData.severity}
+                  onValueChange={(value) => handleSelectChange('severity', value)}
+                  required
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select severity" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="location">Location</Label>
+                <Input
+                  id="location"
+                  name="location"
+                  placeholder="Address or location description"
+                  value={formData.location}
+                  onChange={handleInputChange}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="assigned_to">Assign To (Optional)</Label>
+                <Select
+                  value={formData.assigned_to}
+                  onValueChange={(value) => handleSelectChange('assigned_to', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select ASHA worker" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Unassigned</SelectItem>
+                    {ashaWorkers.map((worker) => (
+                      <SelectItem key={worker.id} value={worker.id}>
+                        {worker.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="description">Description</Label>
+                <Textarea
+                  id="description"
+                  name="description"
+                  rows={3}
+                  placeholder="Detailed description of the alert..."
+                  value={formData.description}
+                  onChange={handleInputChange}
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-4">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setIsDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    selectedAlert ? "Update Alert" : "Create Alert"
+                  )}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      {/* Search and Filters */}
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-red-100 rounded-full">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Active Alerts</p>
+              <p className="text-2xl font-bold">{stats.active}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-orange-100 rounded-full">
+              <Clock className="h-6 w-6 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">High Priority</p>
+              <p className="text-2xl font-bold">{stats.highPriority}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-green-100 rounded-full">
+              <CheckCircle className="h-6 w-6 text-green-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Resolved Today</p>
+              <p className="text-2xl font-bold">{stats.resolved}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Filters */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col md:flex-row gap-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by woman name, type, location..."
-                className="pl-10"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search alerts..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
             </div>
-            <Select value={severityFilter} onValueChange={setSeverityFilter}>
-              <SelectTrigger className="w-[140px]">
-                <Filter className="h-4 w-4 mr-2" />
-                Severity
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-[140px]">
-                <Tag className="h-4 w-4 mr-2" />
-                Type
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="Health Emergency">Health Emergency</SelectItem>
-                <SelectItem value="Missed Checkup">Missed Checkup</SelectItem>
-                <SelectItem value="Delivery Assistance">Delivery Assistance</SelectItem>
-                <SelectItem value="Medication">Medication</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="w-full md:w-48">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger>
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="resolved">Resolved</SelectItem>
+                  <SelectItem value="dismissed">Dismissed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-full md:w-48">
+              <Select value={severityFilter} onValueChange={setSeverityFilter}>
+                <SelectTrigger>
+                  <Filter className="h-4 w-4 mr-2" />
+                  <SelectValue placeholder="Severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severity</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button variant="outline" onClick={filterAlerts}>
+              Apply Filters
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Alerts Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <AnimatePresence>
-          {filteredAlerts.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="col-span-full"
-            >
-              <Card>
-                <CardContent className="p-12 text-center">
-                  <BellOff className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold mb-2">No alerts found</h3>
-                  <p className="text-muted-foreground">
-                    {searchTerm || severityFilter !== 'all' || typeFilter !== 'all'
-                      ? "Try adjusting your filters"
-                      : "All clear! No active alerts at the moment."}
-                  </p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ) : (
-            filteredAlerts.map((alert, index) => (
-              <motion.div
-                key={alert.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ delay: index * 0.05 }}
-                whileHover={{ scale: 1.02 }}
-              >
-                <Card className={`relative overflow-hidden group ${
-                  alert.status === 'active' && alert.severity === 'high' 
-                    ? 'border-2 border-red-200 shadow-lg shadow-red-100' 
-                    : ''
-                }`}>
-                  {/* Animated gradient for high priority */}
-                  {alert.status === 'active' && alert.severity === 'high' && (
-                    <motion.div
-                      className="absolute inset-0 bg-gradient-to-r from-red-500/10 to-orange-500/10"
-                      animate={{ opacity: [0.3, 0.6, 0.3] }}
-                      transition={{ duration: 2, repeat: Infinity }}
-                    />
-                  )}
-                  
-                  <CardContent className="p-5 relative">
-                    {/* Header */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        {getSeverityIcon(alert.severity)}
-                        <div>
-                          <p className="font-semibold">Alert #{alert.id}</p>
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {formatTime(alert.timestamp)}
-                          </p>
+      {/* Alerts Table */}
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Alert Details</TableHead>
+                <TableHead>Woman</TableHead>
+                <TableHead>Location</TableHead>
+                <TableHead>Assigned To</TableHead>
+                <TableHead>Severity</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Time</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredAlerts.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                    No alerts found
+                  </TableCell>
+                </TableRow>
+              ) : (
+                filteredAlerts.map((alert) => (
+                  <TableRow key={alert.id}>
+                    <TableCell>
+                      <div>
+                        <div className="font-medium">{alert.type}</div>
+                        <div className="text-xs text-muted-foreground max-w-[200px] truncate">
+                          {alert.description}
                         </div>
                       </div>
-                      <Badge className={getStatusColor(alert.status)}>
-                        {alert.status}
-                      </Badge>
-                    </div>
-
-                    {/* Woman Name */}
-                    <h3 className="text-lg font-semibold mb-2">
-                      {alert.woman_name || 'Unknown'}
-                    </h3>
-
-                    {/* Type and Location */}
-                    <div className="space-y-2 mb-4">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Tag className="h-4 w-4 text-muted-foreground" />
-                        <span>{alert.type || 'Not specified'}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-2">
+                        <Avatar className="h-6 w-6">
+                          <AvatarFallback className="text-xs">
+                            {getInitials(alert.woman_name || "")}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="text-sm font-medium">{alert.woman_name}</div>
+                          {alert.woman_phone && (
+                            <div className="text-xs text-muted-foreground">{alert.woman_phone}</div>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <MapPin className="h-4 w-4 text-muted-foreground" />
-                        <span className="truncate">{alert.location || 'No location'}</span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center text-xs">
+                        <MapPin className="h-3 w-3 mr-1 flex-shrink-0" />
+                        <span className="truncate max-w-[120px]">{alert.location || "N/A"}</span>
                       </div>
-                    </div>
-
-                    {/* Severity Badge */}
-                    <div className="mb-4">
-                      <Badge className={getSeverityColor(alert.severity)}>
-                        {alert.severity?.toUpperCase() || 'UNKNOWN'} PRIORITY
+                    </TableCell>
+                    <TableCell>
+                      {alert.assigned_to_name || (
+                        <span className="text-muted-foreground text-sm">Unassigned</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getSeverityBadgeVariant(alert.severity)}>
+                        {alert.severity.toUpperCase()}
                       </Badge>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => {
-                          setSelectedAlert(alert);
-                          setIsViewDialogOpen(true);
-                        }}
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        View
-                      </Button>
-                      
-                      {/* Map Button - New */}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="px-2"
-                        onClick={() => handleViewOnMap(alert)}
-                        title="View on map"
-                      >
-                        <Map className="h-4 w-4" />
-                      </Button>
-                      
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusBadgeVariant(alert.status)}>
+                        {alert.status.toUpperCase()}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-xs text-muted-foreground">
+                        {getTimeAgo(alert.created_at)}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
                       {alert.status === 'active' && (
-                        <Button
-                          size="sm"
-                          className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600"
-                          onClick={() => {
-                            setSelectedAlert(alert);
-                            setIsResolveDialogOpen(true);
-                          }}
-                        >
-                          <CheckCircle className="h-4 w-4 mr-2" />
-                          Resolve
-                        </Button>
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleResolve(alert.id)}
+                            title="Resolve"
+                          >
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleDismiss(alert.id)}
+                            title="Dismiss"
+                          >
+                            <XCircle className="h-4 w-4 text-gray-600" />
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="ghost"
-                        size="sm"
-                        className="h-9 w-9 p-0 text-red-600"
+                        size="icon"
+                        onClick={() => handleEdit(alert)}
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => {
-                          setSelectedAlert(alert);
+                          setAlertToDelete(alert.id);
                           setIsDeleteDialogOpen(true);
                         }}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* View Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Alert Details</DialogTitle>
-          </DialogHeader>
-          {selectedAlert && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                {getSeverityIcon(selectedAlert.severity)}
-                <div>
-                  <h3 className="text-xl font-semibold">Alert #{selectedAlert.id}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {selectedAlert.timestamp ? new Date(selectedAlert.timestamp).toLocaleString() : 'No timestamp'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-muted-foreground">Woman Name</Label>
-                  <p className="font-medium">{selectedAlert.woman_name || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Type</Label>
-                  <p className="font-medium">{selectedAlert.type || 'N/A'}</p>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Severity</Label>
-                  <Badge className={getSeverityColor(selectedAlert.severity)}>
-                    {selectedAlert.severity?.toUpperCase()}
-                  </Badge>
-                </div>
-                <div>
-                  <Label className="text-muted-foreground">Status</Label>
-                  <Badge className={getStatusColor(selectedAlert.status)}>
-                    {selectedAlert.status?.toUpperCase()}
-                  </Badge>
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-muted-foreground">Location</Label>
-                <p className="font-medium">{selectedAlert.location || 'N/A'}</p>
-              </div>
-
-              {/* Map Button in Dialog */}
-              {selectedAlert.location && (
-                <Button
-                  className="w-full mt-2"
-                  variant="outline"
-                  onClick={() => {
-                    setIsViewDialogOpen(false);
-                    handleViewOnMap(selectedAlert);
-                  }}
-                >
-                  <Map className="h-4 w-4 mr-2" />
-                  View Location on Map
-                </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
               )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
-              Close
-            </Button>
-            {selectedAlert?.status === 'active' && (
-              <Button
-                className="bg-gradient-to-r from-green-600 to-emerald-600"
-                onClick={() => {
-                  setIsViewDialogOpen(false);
-                  setIsResolveDialogOpen(true);
-                }}
-              >
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Resolve Alert
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
-      {/* Resolve Dialog */}
-      <Dialog open={isResolveDialogOpen} onOpenChange={setIsResolveDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Resolve Alert</DialogTitle>
-            <DialogDescription>
-              Mark this alert as resolved. This action can be reversed later.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedAlert && (
-            <div className="py-4">
-              <p>
-                Resolve alert for <span className="font-medium">{selectedAlert.woman_name}</span>?
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Type: {selectedAlert.type} • Severity: {selectedAlert.severity}
-              </p>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsResolveDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              className="bg-gradient-to-r from-green-600 to-emerald-600"
-              onClick={handleResolveAlert}
-              disabled={actionLoading}
-            >
-              {actionLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Confirm Resolve
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Alert</DialogTitle>
-            <DialogDescription>
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the alert.
-            </DialogDescription>
-          </DialogHeader>
-          {selectedAlert && (
-            <div className="py-4">
-              <p>
-                Delete alert for <span className="font-medium">{selectedAlert.woman_name}</span>?
-              </p>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteAlert}
-              disabled={actionLoading}
-            >
-              {actionLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Delete Permanently
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

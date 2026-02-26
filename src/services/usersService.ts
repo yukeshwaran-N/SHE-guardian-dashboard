@@ -1,19 +1,42 @@
 // src/services/usersService.ts
-import { supabase, AppUser } from './supabase';
+import { supabase } from './supabase';
+
+export interface User {
+  id: string;
+  email: string;
+  role: 'admin' | 'delivery' | 'asha' | 'woman';
+  full_name: string;
+  phone: string | null;
+  avatar_url: string | null;
+  is_active: boolean;
+  created_at: string;
+  last_login: string | null;
+}
 
 export const usersService = {
-  // Get all registered users from the app
+  // Login user with email and password
+  async login(email: string, password: string) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, email, role, full_name, phone, avatar_url, is_active')
+      .eq('email', email)
+      .eq('password', password)
+      .eq('is_active', true)
+      .single();
+    
+    if (error) throw error;
+    return data as User;
+  },
+
+  // Get all users
   async getAllUsers() {
     const { data, error } = await supabase
-      .from('users')  // Using 'users' (plural) as per your SQL
+      .from('users')
       .select('*')
       .order('created_at', { ascending: false });
     
-    if (error) {
-      console.error("Error fetching users:", error);
-      throw error;
-    }
-    return data as AppUser[];
+    if (error) throw error;
+    return data as User[];
   },
 
   // Get user by ID
@@ -25,104 +48,110 @@ export const usersService = {
       .single();
     
     if (error) throw error;
-    return data as AppUser;
+    return data as User;
   },
 
-  // Get new users (last 7 days)
-  async getNewUsers() {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  // Update last login
+  async updateLastLogin(id: string) {
+    const { error } = await supabase
+      .from('users')
+      .update({ last_login: new Date().toISOString() })
+      .eq('id', id);
     
+    if (error) throw error;
+  },
+
+  // Create new user (for registration)
+  async createUser(userData: Partial<User> & { password: string }) {
+    const { data, error } = await supabase
+      .from('users')
+      .insert([{
+        email: userData.email,
+        password: userData.password,
+        role: userData.role || 'woman',
+        full_name: userData.full_name,
+        phone: userData.phone,
+        is_active: true
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data as User;
+  },
+
+  // Update user
+  async updateUser(id: string, userData: Partial<User>) {
+    const { data, error } = await supabase
+      .from('users')
+      .update({
+        full_name: userData.full_name,
+        phone: userData.phone,
+        avatar_url: userData.avatar_url,
+        is_active: userData.is_active,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data as User;
+  },
+
+  // Change password
+  async changePassword(id: string, newPassword: string) {
+    const { error } = await supabase
+      .from('users')
+      .update({ 
+        password: newPassword,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  },
+
+  // Deactivate user (soft delete)
+  async deactivateUser(id: string) {
+    const { error } = await supabase
+      .from('users')
+      .update({ 
+        is_active: false,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  },
+
+  // Activate user
+  async activateUser(id: string) {
+    const { error } = await supabase
+      .from('users')
+      .update({ 
+        is_active: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    return true;
+  },
+
+  // Get users by role
+  async getUsersByRole(role: string) {
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .gte('created_at', sevenDaysAgo.toISOString())
-      .order('created_at', { ascending: false });
+      .eq('role', role)
+      .eq('is_active', true)
+      .order('full_name');
     
     if (error) throw error;
-    return data as AppUser[];
-  },
-
-  // Get users who completed questionnaire
-  async getUsersWithCompletedQuestionnaire() {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('has_completed_questionnaire', true);
-    
-    if (error) throw error;
-    return data as AppUser[];
-  },
-
-  // Get users by language preference
-  async getUsersByLanguage(language: string) {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('preferred_language', language);
-    
-    if (error) throw error;
-    return data as AppUser[];
-  },
-
-  // Get user statistics
-  async getUserStats() {
-    try {
-      // First, try to get counts
-      const { count: total, error: totalError } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true });
-      
-      if (totalError) throw totalError;
-
-      // Get all data for other stats since count with filters might not work
-      const { data, error } = await supabase
-        .from('users')
-        .select('has_completed_questionnaire, is_onboarding_complete, last_active');
-      
-      if (error) throw error;
-
-      const activeToday = data?.filter(u => {
-        if (!u.last_active) return false;
-        const lastActive = new Date(u.last_active).toDateString();
-        const today = new Date().toDateString();
-        return lastActive === today;
-      }).length || 0;
-
-      return {
-        total: total || 0,
-        completedQuestionnaire: data?.filter(u => u.has_completed_questionnaire).length || 0,
-        completedOnboarding: data?.filter(u => u.is_onboarding_complete).length || 0,
-        activeToday: activeToday
-      };
-    } catch (error) {
-      console.error("Error in getUserStats:", error);
-      // Fallback: get all data and calculate manually
-      const { data } = await supabase
-        .from('users')
-        .select('*');
-      
-      if (data) {
-        return {
-          total: data.length,
-          completedQuestionnaire: data.filter(u => u.has_completed_questionnaire).length,
-          completedOnboarding: data.filter(u => u.is_onboarding_complete).length,
-          activeToday: data.filter(u => {
-            if (!u.last_active) return false;
-            const lastActive = new Date(u.last_active).toDateString();
-            const today = new Date().toDateString();
-            return lastActive === today;
-          }).length
-        };
-      }
-      
-      return {
-        total: 0,
-        completedQuestionnaire: 0,
-        completedOnboarding: 0,
-        activeToday: 0
-      };
-    }
+    return data as User[];
   },
 
   // Search users
@@ -131,9 +160,9 @@ export const usersService = {
       .from('users')
       .select('*')
       .or(`full_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
-      .order('created_at', { ascending: false });
+      .order('full_name');
     
     if (error) throw error;
-    return data as AppUser[];
+    return data as User[];
   }
 };

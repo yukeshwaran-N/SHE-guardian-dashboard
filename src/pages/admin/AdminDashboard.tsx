@@ -1,150 +1,206 @@
 // src/pages/admin/AdminDashboard.tsx
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { usersService } from "@/services/usersService";
+import { womenService } from "@/services/womenService";
+import { doctorsService } from "@/services/doctorsService";
+import { ashaService } from "@/services/ashaService";
+import { alertsService } from "@/services/alertsService";
+import { deliveriesService } from "@/services/deliveriesService";
+import { inventoryService } from "@/services/inventoryService";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Users, 
-  AlertTriangle, 
-  Truck, 
-  Activity,
-  TrendingUp,
-  ArrowUpRight,
-  ArrowDownRight,
-  RefreshCw,
-  Bell,
-  Heart,
-  Shield,
-  Award,
-  Target,
+  UserPlus, 
+  Activity, 
+  AlertTriangle,
   Package,
-  UserPlus,
-  CheckCircle,
-  AlertCircle,
-  BarChart3,
-  PieChart,
-  LineChart,
-  Sparkles,
-  Crown,
-  Medal,
-  Loader2
+  Truck,
+  DollarSign,
+  Calendar,
+  TrendingUp,
+  TrendingDown,
+  Loader2,
+  Heart,
+  Stethoscope,
+  ClipboardList
 } from "lucide-react";
 import {
+  LineChart,
+  Line,
   AreaChart,
   Area,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
-  PieChart as RePieChart,
-  Pie,
-  Cell,
+  Legend,
+  ResponsiveContainer
 } from 'recharts';
-import { motion } from 'framer-motion';
-import { supabase } from "@/services/supabase";
-import { format, subDays, eachDayOfInterval } from "date-fns";
 
 interface DashboardStats {
   totalUsers: number;
-  newUsersToday: number;
+  totalWomen: number;
+  totalDoctors: number;
+  totalASHA: number;
   activeAlerts: number;
   pendingDeliveries: number;
-  completedToday: number;
-  highRiskCases: number;
-  totalDeliveries: number;
-  satisfaction: number;
-  responseTime: string;
-}
-
-interface Activity {
-  id: string;
-  action: string;
-  user: string;
-  time: string;
-  icon: any;
-  color: string;
-}
-
-interface WeeklyData {
-  day: string;
-  deliveries: number;
-  alerts: number;
+  lowStockItems: number;
+  totalRevenue: number;
+  womenByRisk: {
+    low: number;
+    medium: number;
+    high: number;
+  };
+  deliveriesByStatus: {
+    pending: number;
+    assigned: number;
+    inTransit: number;
+    delivered: number;
+  };
+  recentActivities: any[];
+  monthlyStats: any[];
 }
 
 export default function AdminDashboard() {
   const { user } = useAuth();
-  const { toast } = useToast();
   const [loading, setLoading] = useState(true);
-  
-  // Real-time stats
   const [stats, setStats] = useState<DashboardStats>({
     totalUsers: 0,
-    newUsersToday: 0,
+    totalWomen: 0,
+    totalDoctors: 0,
+    totalASHA: 0,
     activeAlerts: 0,
     pendingDeliveries: 0,
-    completedToday: 0,
-    highRiskCases: 0,
-    totalDeliveries: 0,
-    satisfaction: 98,
-    responseTime: '2.5'
+    lowStockItems: 0,
+    totalRevenue: 0,
+    womenByRisk: { low: 0, medium: 0, high: 0 },
+    deliveriesByStatus: { pending: 0, assigned: 0, inTransit: 0, delivered: 0 },
+    recentActivities: [],
+    monthlyStats: []
   });
+  const { toast } = useToast();
 
-  const [liveActivities, setLiveActivities] = useState<Activity[]>([]);
-  const [weeklyData, setWeeklyData] = useState<WeeklyData[]>([]);
-  const [riskData, setRiskData] = useState<any[]>([
-    { name: 'High Risk', value: 0, color: '#ef4444' },
-    { name: 'Medium Risk', value: 0, color: '#f59e0b' },
-    { name: 'Low Risk', value: 0, color: '#10b981' },
-  ]);
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
-  // Fetch data on mount
   useEffect(() => {
     fetchDashboardData();
-
-    // Set up real-time subscriptions
-    const usersSubscription = supabase
-      .channel('admin-users')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'users' }, 
-        () => fetchDashboardData()
-      )
-      .subscribe();
-
-    const alertsSubscription = supabase
-      .channel('admin-alerts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, 
-        () => fetchDashboardData()
-      )
-      .subscribe();
-
-    const deliveriesSubscription = supabase
-      .channel('admin-deliveries')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, 
-        () => fetchDashboardData()
-      )
-      .subscribe();
-
-    return () => {
-      usersSubscription.unsubscribe();
-      alertsSubscription.unsubscribe();
-      deliveriesSubscription.unsubscribe();
-    };
   }, []);
 
   const fetchDashboardData = async () => {
-    setLoading(true);
     try {
-      await Promise.all([
-        fetchStats(),
-        fetchWeeklyData(),
-        fetchRiskData(),
-        fetchRecentActivities()
+      setLoading(true);
+      
+      // Fetch all data in parallel
+      const [
+        users,
+        women,
+        doctors,
+        asha,
+        alerts,
+        deliveries,
+        inventory
+      ] = await Promise.all([
+        usersService.getAllUsers(),
+        womenService.getAllWomen(),
+        doctorsService.getAllDoctors(),
+        ashaService.getAllASHAWorkers(),
+        alertsService.getAllAlerts(),
+        deliveriesService.getAllDeliveries(),
+        inventoryService.getAllItems()
       ]);
+
+      // Calculate women by risk level
+      const womenByRisk = {
+        low: women.filter(w => w.risk_level === 'low').length,
+        medium: women.filter(w => w.risk_level === 'medium').length,
+        high: women.filter(w => w.risk_level === 'high').length
+      };
+
+      // Calculate deliveries by status
+      const deliveriesByStatus = {
+        pending: deliveries.filter(d => d.status === 'pending').length,
+        assigned: deliveries.filter(d => d.status === 'assigned').length,
+        inTransit: deliveries.filter(d => d.status === 'in-transit').length,
+        delivered: deliveries.filter(d => d.status === 'delivered').length
+      };
+
+      // Calculate low stock items
+      const lowStockItems = inventory.filter(item => 
+        item.quantity <= (item.threshold || 10)
+      ).length;
+
+      // Calculate total revenue from delivered items
+      const totalRevenue = deliveries
+        .filter(d => d.status === 'delivered' && d.total_amount)
+        .reduce((sum, d) => sum + (d.total_amount || 0), 0);
+
+      // Generate monthly stats (mock data for now - replace with actual data)
+      const monthlyStats = [
+        { name: 'Jan', women: 65, deliveries: 28, alerts: 12 },
+        { name: 'Feb', women: 75, deliveries: 32, alerts: 15 },
+        { name: 'Mar', women: 85, deliveries: 35, alerts: 18 },
+        { name: 'Apr', women: 95, deliveries: 40, alerts: 22 },
+        { name: 'May', women: 105, deliveries: 45, alerts: 25 },
+        { name: 'Jun', women: 115, deliveries: 48, alerts: 28 },
+      ];
+
+      // Create recent activities
+      const recentActivities = [
+        ...alerts.slice(0, 3).map(a => ({
+          id: a.id,
+          type: 'alert',
+          title: `New ${a.severity} priority alert`,
+          description: a.type,
+          time: new Date(a.created_at).toLocaleDateString(),
+          icon: AlertTriangle,
+          color: 'text-red-500'
+        })),
+        ...deliveries.slice(0, 3).map(d => ({
+          id: d.id,
+          type: 'delivery',
+          title: `Delivery ${d.status}`,
+          description: `Order #${d.order_number}`,
+          time: new Date(d.created_at).toLocaleDateString(),
+          icon: Truck,
+          color: 'text-blue-500'
+        })),
+        ...women.slice(0, 3).map(w => ({
+          id: w.id,
+          type: 'woman',
+          title: 'New woman registered',
+          description: w.full_name,
+          time: new Date(w.created_at || '').toLocaleDateString(),
+          icon: UserPlus,
+          color: 'text-green-500'
+        }))
+      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 5);
+
+      setStats({
+        totalUsers: users.length,
+        totalWomen: women.length,
+        totalDoctors: doctors.length,
+        totalASHA: asha.length,
+        activeAlerts: alerts.filter(a => a.status === 'active').length,
+        pendingDeliveries: deliveries.filter(d => d.status === 'pending').length,
+        lowStockItems,
+        totalRevenue,
+        womenByRisk,
+        deliveriesByStatus,
+        recentActivities,
+        monthlyStats
+      });
+
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      console.error("Error fetching dashboard data:", error);
       toast({
         title: "Error",
         description: "Failed to load dashboard data",
@@ -155,568 +211,373 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchStats = async () => {
-    try {
-      // Get total users
-      const { count: totalUsers } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true });
-
-      // Get today's new users
-      const today = new Date().toISOString().split('T')[0];
-      const { count: newUsersToday } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', today);
-
-      // Get active alerts
-      const { count: activeAlerts } = await supabase
-        .from('alerts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'active');
-
-      // Get high risk alerts
-      const { count: highRiskCases } = await supabase
-        .from('alerts')
-        .select('*', { count: 'exact', head: true })
-        .eq('severity', 'high')
-        .eq('status', 'active');
-
-      // Get pending deliveries
-      const { count: pendingDeliveries } = await supabase
-        .from('deliveries')
-        .select('*', { count: 'exact', head: true })
-        .in('status', ['pending', 'assigned']);
-
-      // Get completed today
-      const { count: completedToday } = await supabase
-        .from('deliveries')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'delivered')
-        .gte('scheduled_date', today);
-
-      // Get total deliveries
-      const { count: totalDeliveries } = await supabase
-        .from('deliveries')
-        .select('*', { count: 'exact', head: true });
-
-      setStats({
-        totalUsers: totalUsers || 0,
-        newUsersToday: newUsersToday || 0,
-        activeAlerts: activeAlerts || 0,
-        pendingDeliveries: pendingDeliveries || 0,
-        completedToday: completedToday || 0,
-        highRiskCases: highRiskCases || 0,
-        totalDeliveries: totalDeliveries || 0,
-        satisfaction: 98,
-        responseTime: '2.5'
-      });
-
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
-
-  const fetchWeeklyData = async () => {
-    try {
-      const endDate = new Date();
-      const startDate = subDays(endDate, 6);
-      
-      const days = eachDayOfInterval({ start: startDate, end: endDate });
-      
-      // Initialize weekly data with zeros
-      const weekly = days.map(day => ({
-        day: format(day, 'EEE'),
-        fullDate: format(day, 'yyyy-MM-dd'),
-        deliveries: 0,
-        alerts: 0
-      }));
-
-      // Fetch deliveries for the week using scheduled_date
-      const { data: deliveries } = await supabase
-        .from('deliveries')
-        .select('scheduled_date')
-        .not('scheduled_date', 'is', null);
-
-      // Fetch alerts for the week using timestamp
-      const { data: alerts } = await supabase
-        .from('alerts')
-        .select('timestamp')
-        .not('timestamp', 'is', null);
-
-      // Count deliveries per day
-      deliveries?.forEach(d => {
-        if (d.scheduled_date) {
-          const dateStr = d.scheduled_date;
-          const dayData = weekly.find(w => w.fullDate === dateStr);
-          if (dayData) {
-            dayData.deliveries++;
-          }
-        }
-      });
-
-      // Count alerts per day
-      alerts?.forEach(a => {
-        if (a.timestamp) {
-          const dateStr = a.timestamp.split('T')[0];
-          const dayData = weekly.find(w => w.fullDate === dateStr);
-          if (dayData) {
-            dayData.alerts++;
-          }
-        }
-      });
-
-      // Remove fullDate before setting state
-      const chartData = weekly.map(({ day, deliveries, alerts }) => ({
-        day,
-        deliveries,
-        alerts
-      }));
-
-      console.log('Weekly chart data:', chartData);
-      setWeeklyData(chartData);
-
-    } catch (error) {
-      console.error('Error in fetchWeeklyData:', error);
-    }
-  };
-
-  const fetchRiskData = async () => {
-    try {
-      // Get all active alerts
-      const { data: alerts, error } = await supabase
-        .from('alerts')
-        .select('severity')
-        .eq('status', 'active');
-
-      if (error) throw error;
-
-      if (!alerts || alerts.length === 0) {
-        setRiskData([
-          { name: 'High Risk', value: 33, color: '#ef4444' },
-          { name: 'Medium Risk', value: 33, color: '#f59e0b' },
-          { name: 'Low Risk', value: 34, color: '#10b981' },
-        ]);
-        return;
-      }
-
-      const high = alerts.filter(a => a.severity?.toLowerCase() === 'high').length;
-      const medium = alerts.filter(a => a.severity?.toLowerCase() === 'medium').length;
-      const low = alerts.filter(a => a.severity?.toLowerCase() === 'low').length;
-      const total = high + medium + low;
-
-      setRiskData([
-        { name: 'High Risk', value: Math.round((high / total) * 100) || 0, color: '#ef4444' },
-        { name: 'Medium Risk', value: Math.round((medium / total) * 100) || 0, color: '#f59e0b' },
-        { name: 'Low Risk', value: Math.round((low / total) * 100) || 0, color: '#10b981' },
-      ]);
-
-    } catch (error) {
-      console.error('Error fetching risk data:', error);
-    }
-  };
-
-  const fetchRecentActivities = async () => {
-    try {
-      const activities: Activity[] = [];
-
-      // Get recent users
-      const { data: recentUsers } = await supabase
-        .from('users')
-        .select('full_name, created_at')
-        .order('created_at', { ascending: false })
-        .limit(2);
-
-      recentUsers?.forEach(user => {
-        if (user.full_name) {
-          activities.push({
-            id: `user-${Date.now()}-${Math.random()}`,
-            action: 'New user registered',
-            user: user.full_name,
-            time: formatDistanceToNow(new Date(user.created_at)),
-            icon: UserPlus,
-            color: 'green'
-          });
-        }
-      });
-
-      // Get recent alerts
-      const { data: recentAlerts } = await supabase
-        .from('alerts')
-        .select('woman_name, severity, timestamp')
-        .order('timestamp', { ascending: false })
-        .limit(2);
-
-      recentAlerts?.forEach(alert => {
-        if (alert.woman_name) {
-          activities.push({
-            id: `alert-${Date.now()}-${Math.random()}`,
-            action: 'New alert created',
-            user: alert.woman_name,
-            time: formatDistanceToNow(new Date(alert.timestamp)),
-            icon: AlertTriangle,
-            color: alert.severity === 'high' ? 'red' : 'yellow'
-          });
-        }
-      });
-
-      // Get recent deliveries
-      const { data: recentDeliveries } = await supabase
-        .from('deliveries')
-        .select('woman_name, status, scheduled_date')
-        .eq('status', 'delivered')
-        .order('scheduled_date', { ascending: false })
-        .limit(2);
-
-      recentDeliveries?.forEach(delivery => {
-        if (delivery.woman_name) {
-          activities.push({
-            id: `delivery-${Date.now()}-${Math.random()}`,
-            action: 'Delivery completed',
-            user: delivery.woman_name,
-            time: formatDistanceToNow(new Date(delivery.scheduled_date)),
-            icon: Truck,
-            color: 'blue'
-          });
-        }
-      });
-
-      // Sort by time (most recent first)
-      activities.sort((a, b) => {
-        if (a.time.includes('just now')) return -1;
-        if (b.time.includes('just now')) return 1;
-        return 0;
-      });
-
-      setLiveActivities(activities.slice(0, 4));
-
-    } catch (error) {
-      console.error('Error fetching activities:', error);
-    }
-  };
-
-  const StatCard = ({ title, value, icon: Icon, trend, color, subtitle, delay }: any) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay, duration: 0.5 }}
-    >
-      <Card className="hover:shadow-lg transition-shadow">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">{title}</p>
-              <div className="flex items-baseline gap-2">
-                <h3 className="text-3xl font-bold mt-2">{value}</h3>
-                {trend !== undefined && (
-                  <Badge variant={trend >= 0 ? "success" : "destructive"} className="mt-2">
-                    {trend >= 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                    {Math.abs(trend)}%
-                  </Badge>
-                )}
-              </div>
-              {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
-            </div>
-            <div className={`h-12 w-12 rounded-xl bg-${color}-100 flex items-center justify-center`}>
-              <Icon className={`h-6 w-6 text-${color}-600`} />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const LiveActivityItem = ({ activity }: { activity: Activity }) => (
-    <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors">
-      <div className={`h-8 w-8 rounded-full bg-${activity.color}-100 flex items-center justify-center shrink-0`}>
-        <activity.icon className={`h-4 w-4 text-${activity.color}-600`} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{activity.action}</p>
-        <p className="text-xs text-muted-foreground truncate">{activity.user} • {activity.time}</p>
-      </div>
-    </div>
-  );
-
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-          <p className="text-muted-foreground">Loading dashboard...</p>
-        </div>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6 bg-gray-50 min-h-screen">
+    <div className="space-y-6">
       {/* Header */}
-      <motion.div 
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex justify-between items-center"
-      >
-        <div>
-          <h1 className="text-3xl font-bold text-gray-800">
-            Welcome back, {user?.id}!
-          </h1>
-          <p className="text-gray-500 mt-1">
-            {format(new Date(), "EEEE, MMMM do, yyyy")}
-          </p>
-        </div>
-        <Button variant="outline" size="sm" onClick={fetchDashboardData}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
-      </motion.div>
+      <div>
+        <h1 className="text-3xl font-bold">Admin Dashboard</h1>
+        <p className="text-muted-foreground mt-2">
+          Welcome back, {user?.full_name}. Here's what's happening with your platform.
+        </p>
+      </div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Users"
-          value={stats.totalUsers}
-          icon={Users}
-          trend={12}
-          color="blue"
-          subtitle={`${stats.newUsersToday} new today`}
-          delay={0.1}
-        />
-        <StatCard
-          title="Active Alerts"
-          value={stats.activeAlerts}
-          icon={AlertTriangle}
-          trend={-5}
-          color="red"
-          subtitle={`${stats.highRiskCases} high priority`}
-          delay={0.2}
-        />
-        <StatCard
-          title="Pending Deliveries"
-          value={stats.pendingDeliveries}
-          icon={Truck}
-          trend={8}
-          color="yellow"
-          subtitle={`${stats.completedToday} completed today`}
-          delay={0.3}
-        />
-        <StatCard
-          title="Total Deliveries"
-          value={stats.totalDeliveries}
-          icon={Package}
-          trend={15}
-          color="green"
-          subtitle="All time"
-          delay={0.4}
-        />
+      {/* Key Metrics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-blue-100 rounded-full">
+              <Users className="h-6 w-6 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Total Women</p>
+              <p className="text-2xl font-bold">{stats.totalWomen}</p>
+              <p className="text-xs text-green-600 flex items-center mt-1">
+                <TrendingUp className="h-3 w-3 mr-1" />
+                +12% from last month
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-green-100 rounded-full">
+              <Stethoscope className="h-6 w-6 text-green-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Doctors</p>
+              <p className="text-2xl font-bold">{stats.totalDoctors}</p>
+              <p className="text-xs text-green-600 flex items-center mt-1">
+                <TrendingUp className="h-3 w-3 mr-1" />
+                +3 new this month
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-purple-100 rounded-full">
+              <Heart className="h-6 w-6 text-purple-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">ASHA Workers</p>
+              <p className="text-2xl font-bold">{stats.totalASHA}</p>
+              <p className="text-xs text-green-600 flex items-center mt-1">
+                <TrendingUp className="h-3 w-3 mr-1" />
+                {stats.totalASHA} active
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-orange-100 rounded-full">
+              <AlertTriangle className="h-6 w-6 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Active Alerts</p>
+              <p className="text-2xl font-bold">{stats.activeAlerts}</p>
+              <p className="text-xs text-red-600 flex items-center mt-1">
+                <TrendingDown className="h-3 w-3 mr-1" />
+                {stats.activeAlerts} need attention
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Second Row Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-yellow-100 rounded-full">
+              <Package className="h-6 w-6 text-yellow-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Pending Deliveries</p>
+              <p className="text-2xl font-bold">{stats.pendingDeliveries}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-red-100 rounded-full">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Low Stock Items</p>
+              <p className="text-2xl font-bold">{stats.lowStockItems}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-indigo-100 rounded-full">
+              <Truck className="h-6 w-6 text-indigo-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">In Transit</p>
+              <p className="text-2xl font-bold">{stats.deliveriesByStatus.inTransit}</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 flex items-center space-x-4">
+            <div className="p-3 bg-emerald-100 rounded-full">
+              <DollarSign className="h-6 w-6 text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Total Revenue</p>
+              <p className="text-2xl font-bold">₹{stats.totalRevenue.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Charts Section */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {/* Weekly Chart */}
-        <motion.div 
-          className="col-span-2"
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.5 }}
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <LineChart className="h-5 w-5 text-primary" />
-                Weekly Overview
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[300px]">
-                {weeklyData.length > 0 && weeklyData.some(d => d.deliveries > 0 || d.alerts > 0) ? (
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="women">Women Analytics</TabsTrigger>
+          <TabsTrigger value="deliveries">Delivery Analytics</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Monthly Trends Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Trends</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-80">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={weeklyData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorDeliveries" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                        </linearGradient>
-                        <linearGradient id="colorAlerts" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.8}/>
-                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="day" />
-                      <YAxis allowDecimals={false} />
+                    <LineChart data={stats.monthlyStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
                       <Tooltip />
-                      <Area 
-                        type="monotone" 
-                        dataKey="deliveries" 
-                        stroke="#3b82f6" 
-                        fillOpacity={1} 
-                        fill="url(#colorDeliveries)" 
-                        name="Deliveries"
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="alerts" 
-                        stroke="#ef4444" 
-                        fillOpacity={1} 
-                        fill="url(#colorAlerts)"
-                        name="Alerts"
-                      />
+                      <Legend />
+                      <Line type="monotone" dataKey="women" stroke="#8884d8" name="Women" />
+                      <Line type="monotone" dataKey="deliveries" stroke="#82ca9d" name="Deliveries" />
+                      <Line type="monotone" dataKey="alerts" stroke="#ff7300" name="Alerts" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Women by Risk Level */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Women by Risk Level</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Low Risk', value: stats.womenByRisk.low },
+                          { name: 'Medium Risk', value: stats.womenByRisk.medium },
+                          { name: 'High Risk', value: stats.womenByRisk.high }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {stats.womenByRisk.low > 0 && <Cell fill="#00C49F" />}
+                        {stats.womenByRisk.medium > 0 && <Cell fill="#FFBB28" />}
+                        {stats.womenByRisk.high > 0 && <Cell fill="#FF8042" />}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="women" className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Women Growth Chart */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Women Registration Growth</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={stats.monthlyStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Area type="monotone" dataKey="women" stroke="#8884d8" fill="#8884d8" fillOpacity={0.3} />
                     </AreaChart>
                   </ResponsiveContainer>
-                ) : (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-muted-foreground">No data available for this week</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+                </div>
+              </CardContent>
+            </Card>
 
-        {/* Risk Distribution */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.6 }}
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <PieChart className="h-5 w-5 text-primary" />
-                Risk Distribution
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RePieChart>
-                    <Pie
-                      data={riskData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                      label={({ name, percent }) => 
-                        percent > 0 ? `${name} ${(percent * 100).toFixed(0)}%` : ''
-                      }
-                    >
-                      {riskData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </RePieChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex justify-center gap-4 mt-4">
-                {riskData.map((item) => (
-                  item.value > 0 && (
-                    <div key={item.name} className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded-full" style={{ backgroundColor: item.color }} />
-                      <span className="text-sm">{item.name}</span>
-                    </div>
-                  )
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      </div>
+            {/* ASHA Worker Distribution */}
+            <Card>
+              <CardHeader>
+                <CardTitle>ASHA Worker Distribution</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={[
+                      { name: 'Active', value: stats.totalASHA - 2 },
+                      { name: 'On Leave', value: 2 },
+                      { name: 'Inactive', value: 1 }
+                    ]}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="value" fill="#8884d8">
+                        <Cell fill="#00C49F" />
+                        <Cell fill="#FFBB28" />
+                        <Cell fill="#FF8042" />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
 
-      {/* Live Activity Feed */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.7 }}
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Activity className="h-5 w-5 text-primary" />
-                Recent Activity
-                {liveActivities.length > 0 && (
-                  <Badge variant="outline" className="ml-2 bg-green-100 text-green-800">
-                    <span className="h-2 w-2 bg-green-500 rounded-full mr-2 animate-pulse" />
-                    LIVE
-                  </Badge>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {liveActivities.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No recent activity</p>
-              ) : (
-                <div className="space-y-1">
-                  {liveActivities.map((activity) => (
-                    <LiveActivityItem key={activity.id} activity={activity} />
-                  ))}
+        <TabsContent value="deliveries" className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Deliveries by Status */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Deliveries by Status</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Pending', value: stats.deliveriesByStatus.pending },
+                          { name: 'Assigned', value: stats.deliveriesByStatus.assigned },
+                          { name: 'In Transit', value: stats.deliveriesByStatus.inTransit },
+                          { name: 'Delivered', value: stats.deliveriesByStatus.delivered }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        <Cell fill="#FFBB28" />
+                        <Cell fill="#0088FE" />
+                        <Cell fill="#FF8042" />
+                        <Cell fill="#00C49F" />
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </motion.div>
+              </CardContent>
+            </Card>
 
-        {/* System Health */}
-        <motion.div
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.8 }}
-        >
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5 text-primary" />
-                System Health
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-muted-foreground">Satisfaction Rate</span>
-                    <span className="font-medium">{stats.satisfaction}%</span>
-                  </div>
-                  <Progress value={stats.satisfaction} className="h-2" />
+            {/* Monthly Deliveries Trend */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Monthly Deliveries</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stats.monthlyStats}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="deliveries" fill="#82ca9d" />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-muted-foreground">Response Time</span>
-                    <span className="font-medium">{stats.responseTime}m</span>
-                  </div>
-                  <Progress value={75} className="h-2" />
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* Recent Activities */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Activities</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {stats.recentActivities.map((activity) => (
+              <div key={activity.id} className="flex items-start space-x-4 border-b last:border-0 pb-4 last:pb-0">
+                <div className={`p-2 rounded-full bg-opacity-10 ${activity.color}`}>
+                  <activity.icon className={`h-4 w-4 ${activity.color}`} />
                 </div>
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div className="bg-blue-50 p-3 rounded-lg text-center">
-                    <Shield className="h-5 w-5 text-blue-600 mx-auto mb-1" />
-                    <p className="text-xs text-muted-foreground">System Status</p>
-                    <p className="text-sm font-medium text-green-600">Operational</p>
-                  </div>
-                  <div className="bg-purple-50 p-3 rounded-lg text-center">
-                    <Award className="h-5 w-5 text-purple-600 mx-auto mb-1" />
-                    <p className="text-xs text-muted-foreground">Uptime</p>
-                    <p className="text-sm font-medium">99.9%</p>
-                  </div>
+                <div className="flex-1">
+                  <p className="font-medium">{activity.title}</p>
+                  <p className="text-sm text-muted-foreground">{activity.description}</p>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {activity.time}
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </motion.div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+          <CardContent className="p-6 text-center">
+            <UserPlus className="h-8 w-8 mx-auto mb-2 text-blue-500" />
+            <h3 className="font-semibold">Register New Woman</h3>
+            <p className="text-sm text-muted-foreground mt-1">Add a new woman to the registry</p>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+          <CardContent className="p-6 text-center">
+            <Package className="h-8 w-8 mx-auto mb-2 text-green-500" />
+            <h3 className="font-semibold">Create Delivery</h3>
+            <p className="text-sm text-muted-foreground mt-1">Schedule a new delivery</p>
+          </CardContent>
+        </Card>
+        <Card className="hover:shadow-lg transition-shadow cursor-pointer">
+          <CardContent className="p-6 text-center">
+            <ClipboardList className="h-8 w-8 mx-auto mb-2 text-purple-500" />
+            <h3 className="font-semibold">Generate Report</h3>
+            <p className="text-sm text-muted-foreground mt-1">Create monthly statistics report</p>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
-}
-
-// Helper function for time formatting
-function formatDistanceToNow(date: Date): string {
-  const now = new Date();
-  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-  
-  if (diffInSeconds < 60) return 'just now';
-  if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} min ago`;
-  if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hours ago`;
-  return `${Math.floor(diffInSeconds / 86400)} days ago`;
 }

@@ -1,56 +1,173 @@
 // src/services/womenService.ts
-import { supabase, Woman } from './supabase';
+import { supabase } from './supabase';
+
+export interface Woman {
+  id: string;
+  user_id: string;
+  full_name?: string; // This will come from users table
+  email?: string; // This will come from users table
+  phone?: string; // This will come from users table
+  date_of_birth: string | null;
+  age: number | null;
+  address: string | null;
+  village: string | null;
+  district: string | null;
+  state: string | null;
+  pincode: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  asha_worker_id: string | null;
+  asha_worker_name?: string; // Joined from users table
+  risk_level: 'low' | 'medium' | 'high' | null;
+  last_visit_date: string | null;
+  next_visit_date: string | null;
+  notes: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WomanWithDetails extends Woman {
+  user: {
+    full_name: string;
+    email: string;
+    phone: string;
+  };
+  asha_worker?: {
+    full_name: string;
+    phone: string;
+  };
+}
 
 export const womenService = {
-  // Get all women
+  // Get all women with their user details
   async getAllWomen() {
     const { data, error } = await supabase
       .from('women')
-      .select('*')
-      .order('name');
+      .select(`
+        *,
+        users!women_user_id_fkey (
+          full_name,
+          email,
+          phone
+        ),
+        asha_worker:users!women_asha_worker_id_fkey (
+          full_name,
+          phone
+        )
+      `)
+      .order('created_at', { ascending: false });
     
     if (error) throw error;
     
-    // Transform data to match UI expectations
-    const transformedData = data.map(woman => ({
-      ...woman,
-      // Add computed fields if needed
-      village: woman.address ? extractVillage(woman.address) : 'N/A',
-      risk: getRiskFromStatus(woman.status),
-      last_report: woman.last_visit
-    }));
-    
-    return transformedData as Woman[];
+    // Transform the data to a flat structure
+    return data.map((item: any) => ({
+      ...item,
+      full_name: item.users?.full_name,
+      email: item.users?.email,
+      phone: item.users?.phone,
+      asha_worker_name: item.asha_worker?.full_name
+    })) as Woman[];
   },
 
   // Get woman by ID
   async getWomanById(id: string) {
     const { data, error } = await supabase
       .from('women')
-      .select('*')
+      .select(`
+        *,
+        users!women_user_id_fkey (
+          full_name,
+          email,
+          phone
+        ),
+        asha_worker:users!women_asha_worker_id_fkey (
+          full_name,
+          phone
+        )
+      `)
       .eq('id', id)
       .single();
     
     if (error) throw error;
-    return data as Woman;
+    
+    return {
+      ...data,
+      full_name: data.users?.full_name,
+      email: data.users?.email,
+      phone: data.users?.phone,
+      asha_worker_name: data.asha_worker?.full_name
+    } as Woman;
   },
 
-  // Get high-risk women
-  async getHighRiskWomen() {
+  // Create new woman (creates both users and women records)
+  async createWoman(womanData: any) {
+    // First create user entry
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .insert([{
+        email: womanData.email,
+        password: womanData.password || 'welcome123', // Default password
+        role: 'woman',
+        full_name: womanData.full_name,
+        phone: womanData.phone,
+        is_active: true
+      }])
+      .select()
+      .single();
+    
+    if (userError) throw userError;
+
+    // Then create woman profile
     const { data, error } = await supabase
       .from('women')
-      .select('*')
-      .eq('status', 'high-risk');
+      .insert([{
+        user_id: userData.id,
+        date_of_birth: womanData.date_of_birth,
+        age: womanData.age,
+        address: womanData.address,
+        village: womanData.village,
+        district: womanData.district,
+        state: womanData.state,
+        pincode: womanData.pincode,
+        emergency_contact_name: womanData.emergency_contact_name,
+        emergency_contact_phone: womanData.emergency_contact_phone,
+        asha_worker_id: womanData.asha_worker_id,
+        risk_level: womanData.risk_level || 'low',
+        last_visit_date: womanData.last_visit_date,
+        next_visit_date: womanData.next_visit_date,
+        notes: womanData.notes
+      }])
+      .select()
+      .single();
     
     if (error) throw error;
-    return data as Woman[];
+    return data;
   },
 
-  // Update woman status
-  async updateWomanStatus(id: string, status: Woman['status']) {
+  // Update woman
+  async updateWoman(id: string, womanData: any) {
+    // Update women table
     const { data, error } = await supabase
       .from('women')
-      .update({ status })
+      .update({
+        date_of_birth: womanData.date_of_birth,
+        age: womanData.age,
+        address: womanData.address,
+        village: womanData.village,
+        district: womanData.district,
+        state: womanData.state,
+        pincode: womanData.pincode,
+        emergency_contact_name: womanData.emergency_contact_name,
+        emergency_contact_phone: womanData.emergency_contact_phone,
+        asha_worker_id: womanData.asha_worker_id,
+        risk_level: womanData.risk_level,
+        last_visit_date: womanData.last_visit_date,
+        next_visit_date: womanData.next_visit_date,
+        notes: womanData.notes,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', id)
       .select();
     
@@ -58,42 +175,103 @@ export const womenService = {
     return data;
   },
 
-  // Search women
-  async searchWomen(searchTerm: string) {
-    const { data, error } = await supabase
+  // Delete woman (this will cascade to users table)
+  async deleteWoman(id: string) {
+    const { error } = await supabase
       .from('women')
-      .select('*')
-      .or(`name.ilike.%${searchTerm}%,id.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
-      .order('name');
+      .delete()
+      .eq('id', id);
     
     if (error) throw error;
-    return data as Woman[];
+    return true;
+  },
+
+  // Get women by ASHA worker
+  async getWomenByAshaWorker(ashaWorkerId: string) {
+    const { data, error } = await supabase
+      .from('women')
+      .select(`
+        *,
+        users!women_user_id_fkey (
+          full_name,
+          email,
+          phone
+        )
+      `)
+      .eq('asha_worker_id', ashaWorkerId)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    
+    return data.map((item: any) => ({
+      ...item,
+      full_name: item.users?.full_name,
+      email: item.users?.email,
+      phone: item.users?.phone
+    })) as Woman[];
+  },
+
+  // Get women by risk level
+  async getWomenByRiskLevel(riskLevel: string) {
+    const { data, error } = await supabase
+      .from('women')
+      .select(`
+        *,
+        users!women_user_id_fkey (
+          full_name,
+          email,
+          phone
+        )
+      `)
+      .eq('risk_level', riskLevel)
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    
+    return data.map((item: any) => ({
+      ...item,
+      full_name: item.users?.full_name,
+      email: item.users?.email,
+      phone: item.users?.phone
+    })) as Woman[];
+  },
+
+  // Update last visit date
+  async updateLastVisit(id: string) {
+    const { data, error } = await supabase
+      .from('women')
+      .update({
+        last_visit_date: new Date().toISOString().split('T')[0]
+      })
+      .eq('id', id)
+      .select();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // Get women statistics
+  async getWomenStats() {
+    const { data: total, error: totalError } = await supabase
+      .from('women')
+      .select('*', { count: 'exact', head: true });
+    
+    const { data: highRisk, error: riskError } = await supabase
+      .from('women')
+      .select('*', { count: 'exact', head: true })
+      .eq('risk_level', 'high');
+    
+    const { data: withAsha, error: ashaError } = await supabase
+      .from('women')
+      .select('*', { count: 'exact', head: true })
+      .not('asha_worker_id', 'is', null);
+    
+    if (totalError || riskError || ashaError) throw totalError || riskError || ashaError;
+    
+    return {
+      total: total?.length || 0,
+      highRisk: highRisk?.length || 0,
+      withAshaWorker: withAsha?.length || 0
+    };
   }
 };
-
-// Helper functions
-function extractVillage(address: string): string {
-  if (!address) return 'N/A';
-  
-  const sectorMatch = address.match(/Sector\s+(\d+)/i);
-  if (sectorMatch) return `Sector ${sectorMatch[1]}`;
-  
-  const blockMatch = address.match(/Block\s+([A-Z])/i);
-  if (blockMatch) return `Block ${blockMatch[1]}`;
-  
-  const villageMatch = address.match(/Village\s+([^,]+)/i);
-  if (villageMatch) return villageMatch[1].trim();
-  
-  // Return last part of address
-  const parts = address.split(',');
-  return parts[parts.length - 1]?.trim() || 'N/A';
-}
-
-function getRiskFromStatus(status: string): string {
-  switch(status) {
-    case 'high-risk': return 'High';
-    case 'active': return 'Low';
-    case 'inactive': return 'None';
-    default: return 'Unknown';
-  }
-}
